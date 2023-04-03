@@ -59,6 +59,33 @@ int main(int argc, char** argv)
 
         output_stream << "mov ";
 
+        auto get_register_name = [](const std::byte predicate, const bool is_not_wide) -> std::string
+        {
+            uint8_t predicate_ = static_cast<uint8_t>(predicate);
+            switch (predicate_)
+            {
+                case 0b000:
+                    return is_not_wide ? "al" : "ax";
+                case 0b001: 
+                    return is_not_wide ? "cl" : "cx";
+                case 0b010: 
+                    return is_not_wide ? "dl" : "dx";
+                case 0b011:
+                    return is_not_wide ? "bl" : "bx";
+                case 0b100:
+                    return is_not_wide ? "ah" : "sp";
+                case 0b101: 
+                    return is_not_wide ? "ch" : "bp";
+                case 0b110:
+                    return is_not_wide ? "dh" : "si";
+                case 0b111:
+                    return is_not_wide ? "bh" : "di";
+                default:
+                    assert(!"Invalid code path.");
+                    return "";
+            }
+        };
+
         if (((code_ptr[0] >> 2) & std::byte{0b111111}) == std::byte{0b100010}) // Register/memory to/from register
         {
             instruction_size += 2;
@@ -74,33 +101,6 @@ int main(int argc, char** argv)
             const std::byte MOD = (code_ptr[1] >> 6) & std::byte{0b11};
             const std::byte REG = (code_ptr[1] >> 3) & std::byte{0b111};
             const std::byte R_M = code_ptr[1] & std::byte{0b111};
-
-            auto get_register_name = [](const std::byte predicate, const bool is_not_wide) -> std::string
-            {
-                uint8_t predicate_ = static_cast<uint8_t>(predicate);
-                switch (predicate_)
-                {
-                    case 0b000:
-                        return is_not_wide ? "al" : "ax";
-                    case 0b001: 
-                        return is_not_wide ? "cl" : "cx";
-                    case 0b010: 
-                        return is_not_wide ? "dl" : "dx";
-                    case 0b011:
-                        return is_not_wide ? "bl" : "bx";
-                    case 0b100:
-                        return is_not_wide ? "ah" : "sp";
-                    case 0b101: 
-                        return is_not_wide ? "ch" : "bp";
-                    case 0b110:
-                        return is_not_wide ? "dh" : "si";
-                    case 0b111:
-                        return is_not_wide ? "bh" : "di";
-                    default:
-                        assert(!"Invalid code path.");
-                        return "";
-                }
-            };
 
             auto get_effective_address_calculation = [](const std::byte predicate) -> std::string
             {
@@ -236,19 +236,45 @@ int main(int argc, char** argv)
         }
         else if (((code_ptr[0] >> 1) & std::byte{0b1111111}) == std::byte{0b1100011}) // Immediate to register/memory
         {
-
+            assert(false);
         }
         else if (((code_ptr[0] >> 4) & std::byte{0b1111})== std::byte{0b1011}) // Immediate to register
         {
+            instruction_size += 2;
 
+            const uint8_t W = static_cast<uint8_t>((code_ptr[0] >> 3) & std::byte{0b1});
+            const uint8_t REG = static_cast<uint8_t>(code_ptr[0] & std::byte{0b111});
+
+            const std::string register_name = get_register_name(static_cast<std::byte>(REG), W == 0);
+
+            uint16_t immediate_value = 0;
+
+            switch (W)
+            {
+                case 0b0:
+                {
+                    immediate_value = static_cast<uint16_t>(code_ptr[1]);
+                } break;
+
+                case 0b1:
+                {
+                    immediate_value = (static_cast<uint16_t>(code_ptr[2]) << 8) | static_cast<uint16_t>(code_ptr[1]);
+                    instruction_size += 1;
+                } break;
+
+                default:
+                    assert(!"Invalid W value.");
+            }
+
+            output_stream << register_name << ", " << std::to_string(immediate_value);
         }
         else if (((code_ptr[0] >> 1) & std::byte{0b1111111}) == std::byte{0b1010000}) // Memory to accumulator
         {
-
+            assert(false);
         }
         else if (((code_ptr[0] >> 1) & std::byte{0b1111111}) == std::byte{0b1010001}) // Accumulator to memory
         {
-
+            assert(false);
         }
         else
         {
