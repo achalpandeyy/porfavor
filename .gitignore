@@ -1,6 +1,9 @@
 build/
+.vs/
+.vscode/
 
 *.asm
+*.sln
 
 listing_*
 out_listing_*

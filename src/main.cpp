@@ -10,14 +10,14 @@ int main(int argc, char** argv)
     if (argc == 1)
     {
         std::cout << "No input file provided. Using the default one." << std::endl;
-        in_file_path = "listing_0037_single_register_mov";
+        in_file_path = "tests/listing_0037_single_register_mov";
     }
     else
     {
         in_file_path = argv[1];
     }
 
-    std::cout << "Input file: " << in_file_path << std::endl;
+    std::cout << "[INFO]: Input file: " << in_file_path << std::endl;
 
     std::vector<std::byte> assembled_code;
     {
@@ -50,147 +50,151 @@ int main(int argc, char** argv)
         }
     }
 
-    const uint32_t mov_instruction_size = 2;
-    assert(mov_instruction_size == 2);
-    const uint32_t mov_instruction_count = static_cast<uint32_t>(assembled_code.size()/mov_instruction_size);
-
-    constexpr std::byte MOV_OPCODE = std::byte{0b100010};
-    constexpr std::byte REGISTER_TO_REGISTER_MOD = std::byte{0b11};
-
+    std::byte* code_ptr = assembled_code.data();
     std::stringstream output_stream;
-    for (uint32_t i = 0; i < mov_instruction_count; ++i)
+
+    while (code_ptr != assembled_code.data() + assembled_code.size())
     {
-        const auto& MSByte = assembled_code[i*mov_instruction_size + 0];
-        const auto& LSByte = assembled_code[i*mov_instruction_size + 1];
-
-        const std::byte opcode = (MSByte >> 2) & std::byte{0x3f};
-        if (opcode != MOV_OPCODE)
+        if (((code_ptr[0] >> 2) & std::byte{0b111111}) == std::byte{0b100010}) // Register/memory to/from register
         {
-            std::cout << "[ERROR]: Invalid opcode. Only the mov instruction is supported." << std::endl;
-            return -1;
+            // If D = 0, then REG gives the src register and R/M gives the dst register.
+            // If D = 1, then REG gives the dst register and R/M gives the src register.
+
+            // NOTE:
+            // This should cover the following cases:
+            // 1. Register to register move:    mov al, bl
+            // 2. Register to memory move:      mov [bx + di], cx
+            // 3. Memory to register move:      mov cx, [bx + di]
+
+            const std::byte D = (code_ptr[0] >> 1) & std::byte{0b1};
+            const std::byte W = (code_ptr[0] & std::byte{0b1});
+            const std::byte MOD = (code_ptr[1] >> 6) & std::byte{0b11};
+            if (MOD == std::byte{0b00})
+            {
+
+            }
+            else if (MOD == std::byte{0b01})
+            {
+
+            }
+            else if (MOD == std::byte{0b10})
+            {
+
+            }
+            else if (MOD == std::byte{0b11})
+            {
+                const std::byte REG = (code_ptr[1] >> 3) & std::byte{0b111};
+                const std::byte R_M = code_ptr[1] & std::byte{0b111};
+
+                output_stream << "mov ";
+
+                // NOTE: It just so happens that for MOD 11 (register-to-register mode) both REG and R/M fields are mapped to the same register names.
+                auto insert_register_name = [&output_stream, W](const std::byte predicate) -> bool
+                {
+                    if (predicate == std::byte{0b000})
+                        W == std::byte{0b0} ? output_stream << "al" : output_stream << "ax";
+                    else if (predicate == std::byte{0b001})
+                        W == std::byte{0b0} ? output_stream << "cl" : output_stream << "cx";
+                    else if (predicate == std::byte{0b010})
+                        W == std::byte{0b0} ? output_stream << "dl" : output_stream << "dx";
+                    else if (predicate == std::byte{0b011})
+                        W == std::byte{0b0} ? output_stream << "bl" : output_stream << "bx";
+                    else if (predicate == std::byte{0b100})
+                        W == std::byte{0b0} ? output_stream << "ah" : output_stream << "sp";
+                    else if (predicate == std::byte{0b101})
+                        W == std::byte{0b0} ? output_stream << "ch" : output_stream << "bp";
+                    else if (predicate == std::byte{0b110})
+                        W == std::byte{0b0} ? output_stream << "dh" : output_stream << "si";
+                    else if (predicate == std::byte{0b111})
+                        W == std::byte{0b0} ? output_stream << "bh" : output_stream << "di";
+                    else
+                        return false;
+
+                    return true;
+                };
+
+                if (D == std::byte{0b0})
+                {
+                    if (!insert_register_name(R_M))
+                    {
+                        std::cout << "Invalid R/M value." << std::endl;
+                        return -1;
+                    }
+
+                    output_stream << ", ";
+
+                    if (!insert_register_name(REG))
+                    {
+                        std::cout << "Invalid REG value." << std::endl;
+                        return -1;
+                    }
+                }
+                else if (D == std::byte{0b1})
+                {
+                    if (!insert_register_name(REG))
+                    {
+                        std::cout << "Invalid REG value." << std::endl;
+                        return -1;
+                    }
+
+                    output_stream << ", ";
+
+                    if (!insert_register_name(R_M))
+                    {
+                        std::cout << "Invalid R/M value." << std::endl;
+                        return -1;
+                    }
+                }
+                else
+                {
+                    std::cout << "[ERROR]: Invalid D value." << std::endl;
+                    return -1;
+                }
+
+                output_stream << "\n";
+            }
+            else
+            {
+                std::cout << "[ERROR]: Unknown MOD value." << std::endl;
+                return -1;
+            }
         }
-
-        output_stream << "mov ";
-
-        const std::byte mod = (LSByte >> 6) & std::byte{0b11};
-        if (mod != REGISTER_TO_REGISTER_MOD)
+        else if (((code_ptr[0] >> 1) & std::byte{0b1111111}) == std::byte{0b1100011}) // Immediate to register/memory
         {
-            std::cout << "[ERROR]: Invalid MOD value. Only register-to-register mode is supported." << std::endl;
-            return -1;
+
         }
-
-        const std::byte reg = (LSByte >> 3) & std::byte{0b111};
-        const std::byte r_m = LSByte & std::byte{0b111};
-        const std::byte w = MSByte & std::byte{0b1};
-
-        if (w == std::byte{0b0})
+        else if (((code_ptr[0] >> 4) & std::byte{0b1111})== std::byte{0b1011}) // Immediate to register
         {
-            if (r_m == std::byte{0b000})
-                output_stream << "al, ";
-            else if (r_m == std::byte{0b001})
-                output_stream << "cl, ";
-            else if (r_m == std::byte{0b010})
-                output_stream << "dl, ";
-            else if (r_m == std::byte{0b011})
-                output_stream << "bl, ";
-            else if (r_m == std::byte{0b100})
-                output_stream << "ah, ";
-            else if (r_m == std::byte{0b101})
-                output_stream << "ch, ";
-            else if (r_m == std::byte{0b110})
-                output_stream << "dh, ";
-            else if (r_m == std::byte{0b111})
-                output_stream << "bh, ";
-            else
-            {
-                std::cout << "Invalid R/M value." << std::endl;
-                return -1;
-            }
 
-            if (reg == std::byte{0b000})
-                output_stream << "al";
-            else if (reg == std::byte{0b001})
-                output_stream << "cl";
-            else if (reg == std::byte{0b010})
-                output_stream << "dl";
-            else if (reg == std::byte{0b011})
-                output_stream << "bl";
-            else if (reg == std::byte{0b100})
-                output_stream << "ah";
-            else if (reg == std::byte{0b101})
-                output_stream << "ch";
-            else if (reg == std::byte{0b110})
-                output_stream << "dh";
-            else if (reg == std::byte{0b111})
-                output_stream << "bh";
-            else
-            {
-                std::cout << "Invalid REG value." << std::endl;
-                return -1;
-            }
         }
-        else if (w == std::byte{0b1})
+        else if (((code_ptr[0] >> 1) & std::byte{0b1111111}) == std::byte{0b1010000}) // Memory to accumulator
         {
-            if (r_m == std::byte{0b000})
-                output_stream << "ax, ";
-            else if (r_m == std::byte{0b001})
-                output_stream << "cx, ";
-            else if (r_m == std::byte{0b010})
-                output_stream << "dx, ";
-            else if (r_m == std::byte{0b011})
-                output_stream << "bx, ";
-            else if (r_m == std::byte{0b100})
-                output_stream << "sp, ";
-            else if (r_m == std::byte{0b101})
-                output_stream << "bp, ";
-            else if (r_m == std::byte{0b110})
-                output_stream << "si, ";
-            else if (r_m == std::byte{0b111})
-                output_stream << "di, ";
-            else
-            {
-                std::cout << "Invalid R/M value." << std::endl;
-                return -1;
-            }
 
-            if (reg == std::byte{0b000})
-                output_stream << "ax";
-            else if (reg == std::byte{0b001})
-                output_stream << "cx";
-            else if (reg == std::byte{0b010})
-                output_stream << "dx";
-            else if (reg == std::byte{0b011})
-                output_stream << "bx";
-            else if (reg == std::byte{0b100})
-                output_stream << "sp";
-            else if (reg == std::byte{0b101})
-                output_stream << "bp";
-            else if (reg == std::byte{0b110})
-                output_stream << "si";
-            else if (reg == std::byte{0b111})
-                output_stream << "di";
-            else
-            {
-                std::cout << "Invalid REG value." << std::endl;
-                return -1;
-            }
+        }
+        else if (((code_ptr[0] >> 1) & std::byte{0b1111111}) == std::byte{0b1010001}) // Accumulator to memory
+        {
+
         }
         else
         {
-            std::cout << "Invalid W value." << std::endl;
+            std::cout << "[ERROR]: Unknown instruction. Can't derive the opcode." << std::endl;
             return -1;
         }
 
-        output_stream << "\n";
+        code_ptr += 2;
     }
-
-    std::cout << output_stream.str() << std::endl;
 
     const char* out_file_path;
     {
         std::stringstream path_stream;
+        path_stream << "tests/";
         path_stream << "out_";
-        path_stream << in_file_path;
+        const auto in_file_path_string = std::string(in_file_path);
+        const auto slash_index = in_file_path_string.find_first_of("/\\");
+        assert(slash_index != std::string::npos);
+
+        const auto real_file_name = in_file_path_string.substr(slash_index + 1, std::string::npos);
+        path_stream << real_file_name;
         path_stream << ".asm";
 
         out_file_path = path_stream.str().c_str();
