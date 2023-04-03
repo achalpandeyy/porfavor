@@ -61,8 +61,7 @@ int main(int argc, char** argv)
 
         if (((code_ptr[0] >> 2) & std::byte{0b111111}) == std::byte{0b100010}) // Register/memory to/from register
         {
-            // If D = 0, then REG gives the src register and R/M gives the dst register.
-            // If D = 1, then REG gives the dst register and R/M gives the src register.
+            instruction_size += 2;
 
             // NOTE:
             // This should cover the following cases:
@@ -76,83 +75,96 @@ int main(int argc, char** argv)
             const std::byte REG = (code_ptr[1] >> 3) & std::byte{0b111};
             const std::byte R_M = code_ptr[1] & std::byte{0b111};
 
-            auto insert_register_name = [&output_stream](const std::byte predicate, const std::byte w) -> bool
+            auto get_register_name = [](const std::byte predicate, const bool is_not_wide) -> std::string
             {
-                if (predicate == std::byte{0b000})
-                    w == std::byte{0b0} ? output_stream << "al" : output_stream << "ax";
-                else if (predicate == std::byte{0b001})
-                    w == std::byte{0b0} ? output_stream << "cl" : output_stream << "cx";
-                else if (predicate == std::byte{0b010})
-                    w == std::byte{0b0} ? output_stream << "dl" : output_stream << "dx";
-                else if (predicate == std::byte{0b011})
-                    w == std::byte{0b0} ? output_stream << "bl" : output_stream << "bx";
-                else if (predicate == std::byte{0b100})
-                    w == std::byte{0b0} ? output_stream << "ah" : output_stream << "sp";
-                else if (predicate == std::byte{0b101})
-                    w == std::byte{0b0} ? output_stream << "ch" : output_stream << "bp";
-                else if (predicate == std::byte{0b110})
-                    w == std::byte{0b0} ? output_stream << "dh" : output_stream << "si";
-                else if (predicate == std::byte{0b111})
-                    w == std::byte{0b0} ? output_stream << "bh" : output_stream << "di";
-                else
-                    return false;
+                uint8_t predicate_ = static_cast<uint8_t>(predicate);
+                switch (predicate_)
+                {
+                    case 0b000:
+                        return is_not_wide ? "al" : "ax";
+                    case 0b001: 
+                        return is_not_wide ? "cl" : "cx";
+                    case 0b010: 
+                        return is_not_wide ? "dl" : "dx";
+                    case 0b011:
+                        return is_not_wide ? "bl" : "bx";
+                    case 0b100:
+                        return is_not_wide ? "ah" : "sp";
+                    case 0b101: 
+                        return is_not_wide ? "ch" : "bp";
+                    case 0b110:
+                        return is_not_wide ? "dh" : "si";
+                    case 0b111:
+                        return is_not_wide ? "bh" : "di";
+                    default:
+                        assert(!"Invalid code path.");
+                        return "";
+                }
+            };
 
-                return true;
+            auto get_effective_address_calculation = [](const std::byte predicate) -> std::string
+            {
+                uint8_t predicate_ = static_cast<uint8_t>(predicate);
+                switch (predicate_)
+                {
+                    case 0b000:
+                        return "bx + si";
+                    case 0b001:
+                        return "bx + di";
+                    case 0b010: 
+                        return "bp + si";
+                    case 0b011:
+                        return "bp + di";
+                    case 0b100:
+                        return "si";
+                    case 0b101:
+                        return "di";
+                    case 0b111:
+                        return "bx";
+                    default:
+                        assert(!"Invalid R/M value");
+                        return "";
+                }
             };
 
             if (MOD == std::byte{0b00})
             {
-                instruction_size += 2;
-
-                uint16_t direct_address = UINT16_MAX; // Assuming this won't be a direct address, but it could be, who knows.
-
-                if (R_M == std::byte{0b110})
+                const std::string register_name = get_register_name(REG, W == std::byte{0b0});
+                std::string memory_address;
                 {
-                    direct_address = (static_cast<uint16_t>(code_ptr[3]) << 8) | static_cast<uint16_t>(code_ptr[2]);
-                    instruction_size += 2; // add the bytes for encoding displacement
-                }
-
-                auto insert_address_calculation = [&output_stream, direct_address](const std::byte R_M_) -> bool
-                {
-                    if (R_M_ == std::byte{0b000})
-                        output_stream << "[bx + si]";
-                    else if (R_M_ == std::byte{0b001})
-                        output_stream << "[bx + di]";
-                    else if (R_M_ == std::byte{0b010})
-                        output_stream << "[bp + si]";
-                    else if (R_M_ == std::byte{0b011})
-                        output_stream << "[bp + di]";
-                    else if (R_M_ == std::byte{0b100})
-                        output_stream << "[si]";
-                    else if (R_M_ == std::byte{0b101})
-                        output_stream << "[di]";
-                    else if (R_M_ == std::byte{0b110})
-                        output_stream << "[" << direct_address << "]";
-                    else if (R_M_ == std::byte{0b111})
-                        output_stream << "[bx]";
+                    if (R_M == std::byte{0b110})
+                    {
+                        const uint16_t direct_address = (static_cast<uint16_t>(code_ptr[3]) << 8) | static_cast<uint16_t>(code_ptr[2]);
+                        memory_address = std::to_string(direct_address);
+                        instruction_size += 2; // add the bytes for encoding displacement
+                    }
                     else
-                        return false;
-                    
-                    return true;
-                };
-
-                if (!((D == std::byte{0b0}) ? insert_address_calculation(R_M) : insert_register_name(REG, W)))
-                {
-                    std::cout << "[ERROR]: Invalid " << ((D == std::byte{0b0}) ? "R/M" : "REG") << " value." << std::endl;
-                    return -1;
+                    {
+                        memory_address = get_effective_address_calculation(R_M);
+                    }
                 }
 
-                output_stream << ", ";
-
-                if (!((D == std::byte{0b1}) ? insert_address_calculation(R_M) : insert_register_name(REG, W)))
+                switch (static_cast<uint8_t>(D))
                 {
-                    std::cout << "[ERROR]: Invalid " << ((D == std::byte{0b1}) ? "R/M" : "REG") << " value." << std::endl;
-                    return -1;
+                    case 0b0:
+                        output_stream << register_name << ", " << "[" << memory_address << "]";
+                        break;
+
+                    case 0b1:
+                        output_stream << "[" << memory_address << "]" << ", " << register_name;
+                        break;
+
+                    default:
+                        assert(!"Invalid D value.");
                 }
             }
             else if (MOD == std::byte{0b01})
             {
                 // 8-bit displacement.
+                // const uint8_t displacement = static_cast<uint8_t>(code_ptr[2]);
+
+
+
             }
             else if (MOD == std::byte{0b10})
             {
@@ -160,21 +172,23 @@ int main(int argc, char** argv)
             }
             else if (MOD == std::byte{0b11})
             {
-                // NOTE: It just so happens that for MOD 11 (register-to-register mode) both REG and R/M fields are mapped to the same register names.
-                assert(D == std::byte{0b0} || D == std::byte{0b1});
+                // NOTE: It just so happens that for MOD 11 (register-to-register mode) both REG and R/M fields are mapped to the same register names, thus
+                // we can use the same lambda.
+                const std::string R_M_register_name = get_register_name(R_M, W == std::byte{0b0});
+                const std::string REG_register_name = get_register_name(REG, W == std::byte{0b0});
 
-                if (!insert_register_name((D == std::byte{0b0} ? R_M : REG), W))
+                switch (static_cast<uint8_t>(D))
                 {
-                    std::cout << "Invalid " << ((D == std::byte{0b0}) ? "R/M" : "REG") << " value." << std::endl;
-                    return -1;
-                }
+                    case 0b0:
+                        output_stream << R_M_register_name << ", " << REG_register_name;
+                        break;
 
-                output_stream << ", ";
+                    case 0b1:
+                        output_stream << REG_register_name << ", " << R_M_register_name;
+                        break;
 
-                if (!insert_register_name((D == std::byte{0b1}) ? R_M : REG, W))
-                {
-                    std::cout << "Invalid " << (D == std::byte{0b1} ? "R/M" : "REG") << " value." << std::endl;
-                    return -1;
+                    default:
+                        assert(!"Invalid D value.");
                 }
             }
             else
