@@ -119,6 +119,8 @@ int main(int argc, char** argv)
                         return "si";
                     case 0b101:
                         return "di";
+                    case 0b110:
+                        return "bp"; // this case shouldn't run for MOD = 00
                     case 0b111:
                         return "bx";
                     default:
@@ -147,11 +149,11 @@ int main(int argc, char** argv)
                 switch (static_cast<uint8_t>(D))
                 {
                     case 0b0:
-                        output_stream << register_name << ", " << "[" << memory_address << "]";
+                        output_stream << "[" << memory_address << "]" << ", " << register_name;
                         break;
 
                     case 0b1:
-                        output_stream << "[" << memory_address << "]" << ", " << register_name;
+                        output_stream << register_name << ", " << "[" << memory_address << "]";
                         break;
 
                     default:
@@ -161,14 +163,49 @@ int main(int argc, char** argv)
             else if (MOD == std::byte{0b01})
             {
                 // 8-bit displacement.
-                // const uint8_t displacement = static_cast<uint8_t>(code_ptr[2]);
+                const uint8_t displacement = static_cast<uint8_t>(code_ptr[2]);
 
+                instruction_size += 1;
 
+                const std::string register_name = get_register_name(REG, W == std::byte{0b0});
+                const std::string memory_address = get_effective_address_calculation(R_M);
 
+                switch (static_cast<uint8_t>(D))
+                {
+                    case 0b0:
+                        output_stream << "[" << memory_address << " + " << std::to_string(displacement) << "]" << ", " << register_name;
+                        break;
+
+                    case 0b1:
+                        output_stream << register_name << ", " << "[" << memory_address << " + " << std::to_string(displacement) << "]";
+                        break;
+
+                    default:
+                        assert(!"Invalid D value.");
+                }
             }
             else if (MOD == std::byte{0b10})
             {
-                // 16-bit displacement.
+                const uint16_t displacement = (static_cast<uint16_t>(code_ptr[3]) << 8) | static_cast<uint16_t>(code_ptr[2]);
+
+                instruction_size += 2;
+
+                const std::string register_name = get_register_name(REG, W == std::byte{0b0});
+                const std::string memory_address = get_effective_address_calculation(R_M);
+
+                switch (static_cast<uint8_t>(D))
+                {
+                    case 0b0:
+                        output_stream << "[" << memory_address << " + " << std::to_string(displacement) << "]" << ", " << register_name;
+                        break;
+
+                    case 0b1:
+                        output_stream << register_name << ", " << "[" << memory_address << " + " << std::to_string(displacement) << "]";
+                        break;
+
+                    default:
+                        assert(!"Invalid D value.");
+                }
             }
             else if (MOD == std::byte{0b11})
             {
