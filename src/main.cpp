@@ -163,21 +163,27 @@ int main(int argc, char** argv)
             else if (MOD == std::byte{0b01})
             {
                 // 8-bit displacement.
-                const uint8_t displacement = static_cast<uint8_t>(code_ptr[2]);
-
                 instruction_size += 1;
-
+                
                 const std::string register_name = get_register_name(REG, W == std::byte{0b0});
-                const std::string memory_address = get_effective_address_calculation(R_M);
+                std::string memory_address = get_effective_address_calculation(R_M);
+
+                const int8_t displacement = static_cast<int8_t>(code_ptr[2]);
+
+                // NOTE: If MOD is 01 we always consider the displacement to be signed, according to the instruction manual, of course.
+                if (displacement >= 0)
+                    memory_address += " + " + std::to_string(displacement);
+                else
+                    memory_address += " - " + std::to_string(-displacement);
 
                 switch (static_cast<uint8_t>(D))
                 {
                     case 0b0:
-                        output_stream << "[" << memory_address << " + " << std::to_string(displacement) << "]" << ", " << register_name;
+                        output_stream << "[" << memory_address << "]" << ", " << register_name;
                         break;
 
                     case 0b1:
-                        output_stream << register_name << ", " << "[" << memory_address << " + " << std::to_string(displacement) << "]";
+                        output_stream << register_name << ", " << "[" << memory_address << "]";
                         break;
 
                     default:
