@@ -244,13 +244,27 @@ int main(int argc, char** argv)
 
             output_stream << register_name << ", " << std::to_string(get_immediate_value(W));
         }
-        else if (((instruction_stream[0] >> 1) & 0b1111111) == 0b1010000) // Memory to accumulator
+        else if (((opcode_byte >> 1) & 0b1111111) == 0b1010000) // Memory to accumulator
         {
-            assert(false);
+            const uint8_t W = opcode_byte & 0b1;
+            const std::string register_name = (W == 0b0) ? "al" : "ax";
+
+            const uint16_t addr_lo = static_cast<uint16_t>(*instruction_stream++);
+            const uint16_t addr_hi = static_cast<uint16_t>(*instruction_stream++);
+            const uint16_t addr = (addr_hi << 8) | addr_lo;
+            
+            output_stream << register_name << ", " << "[" << std::to_string(addr) << "]";
         }
-        else if (((instruction_stream[0] >> 1) & 0b1111111) == 0b1010001) // Accumulator to memory
+        else if (((opcode_byte >> 1) & 0b1111111) == 0b1010001) // Accumulator to memory
         {
-            assert(false);
+            const uint8_t W = opcode_byte & 0b1;
+            const std::string register_name = (W == 0b0) ? "al" : "ax";
+
+            const uint16_t addr_lo = static_cast<uint16_t>(*instruction_stream++);
+            const uint16_t addr_hi = static_cast<uint16_t>(*instruction_stream++);
+            const uint16_t addr = (addr_hi << 8) | addr_lo;
+
+            output_stream << "[" << std::to_string(addr) << "]" << ", " << register_name;
         }
         else
         {
