@@ -50,13 +50,11 @@ int main(int argc, char** argv)
         }
     }
 
-    uint8_t* code_ptr = assembled_code.data();
+    uint8_t* instruction_stream = assembled_code.data();
     std::stringstream output_stream;
 
-    while (code_ptr != assembled_code.data() + assembled_code.size())
+    while (instruction_stream != assembled_code.data() + assembled_code.size())
     {
-        uint64_t instruction_size = 0;
-
         output_stream << "mov ";
 
         auto get_register_name = [](const uint8_t predicate, const bool is_not_wide) -> std::string
@@ -85,23 +83,12 @@ int main(int argc, char** argv)
             }
         };
 
-        if (((code_ptr[0] >> 2) & 0b111111) == 0b100010) // Register/memory to/from register
+        auto get_memory_address_expression = [&instruction_stream](const uint8_t MOD, const uint8_t R_M) -> std::string
         {
-            instruction_size += 2;
+            if (MOD == 0b11) // not a memory mode
+                return "";
 
-            // NOTE:
-            // This should cover the following cases:
-            // 1. Register to register move:    mov al, bl
-            // 2. Register to memory move:      mov [bx + di], cx
-            // 3. Memory to register move:      mov cx, [bx + di]
-
-            const uint8_t D     = (code_ptr[0] >> 1) & 0b1;
-            const uint8_t W     = code_ptr[0]        & 0b1;
-            const uint8_t MOD   = (code_ptr[1] >> 6) & 0b11;
-            const uint8_t REG   = (code_ptr[1] >> 3) & 0b111;
-            const uint8_t R_M   = code_ptr[1]        & 0b111;
-
-            auto get_effective_address_calculation = [](const uint8_t predicate) -> std::string
+            auto get_register_name_expression = [](const uint8_t predicate) -> std::string
             {
                 switch (predicate)
                 {
@@ -122,163 +109,146 @@ int main(int argc, char** argv)
                     case 0b111:
                         return "bx";
                     default:
-                        assert(!"Invalid R/M value");
+                        assert(!"Invalid predicate");
                         return "";
                 }
             };
 
-            if (MOD == 0b00)
+            std::string result;
+            switch (MOD)
             {
-                const std::string register_name = get_register_name(REG, W == 0b0);
-                std::string memory_address;
+                case 0b00: // no displacement, except the direct address special case
                 {
-                    if (R_M == 0b110)
+                    if (R_M == 0b110) // special case
                     {
-                        const uint16_t direct_address = (static_cast<uint16_t>(code_ptr[3]) << 8) | static_cast<uint16_t>(code_ptr[2]);
-                        memory_address = std::to_string(direct_address);
-                        instruction_size += 2; // add the bytes for encoding displacement
+                        const uint16_t lo = static_cast<uint16_t>(*instruction_stream++);
+                        const uint16_t hi = static_cast<uint16_t>(*instruction_stream++);
+                        const uint16_t direct_address = (hi << 8) | lo;
+                        result = std::to_string(direct_address);
                     }
                     else
                     {
-                        memory_address = get_effective_address_calculation(R_M);
+                        result = get_register_name_expression(R_M);
                     }
-                }
+                } break;
 
-                switch (static_cast<uint8_t>(D))
+                case 0b01: // 8-bit displacement
                 {
-                    case 0b0:
-                        output_stream << "[" << memory_address << "]" << ", " << register_name;
-                        break;
+                    result = get_register_name_expression(R_M);
 
-                    case 0b1:
-                        output_stream << register_name << ", " << "[" << memory_address << "]";
-                        break;
+                    const int8_t displacement = static_cast<int8_t>(*instruction_stream++);
 
-                    default:
-                        assert(!"Invalid D value.");
-                }
-            }
-            else if (MOD == 0b01)
-            {
-                // 8-bit displacement.
-                instruction_size += 1;
+                    // NOTE: If MOD is 01 we always consider the displacement to be signed, according to the instruction manual, of course.
+                    if (displacement >= 0)
+                        result += " + " + std::to_string(displacement);
+                    else
+                        result += " - " + std::to_string(-displacement);
+                } break;
 
-                const std::string register_name = get_register_name(REG, W == 0b0);
-                std::string memory_address = get_effective_address_calculation(R_M);
-
-                const int8_t displacement = static_cast<int8_t>(code_ptr[2]);
-
-                // NOTE: If MOD is 01 we always consider the displacement to be signed, according to the instruction manual, of course.
-                if (displacement >= 0)
-                    memory_address += " + " + std::to_string(displacement);
-                else
-                    memory_address += " - " + std::to_string(-displacement);
-
-                switch (static_cast<uint8_t>(D))
+                case 0b10: // 16-bit displacement
                 {
-                    case 0b0:
-                        output_stream << "[" << memory_address << "]" << ", " << register_name;
-                        break;
+                    const uint16_t lo = static_cast<uint16_t>(*instruction_stream++);
+                    const uint16_t hi = static_cast<uint16_t>(*instruction_stream++);
+                    const uint16_t displacement = (hi << 8) | lo;
+                
+                    result = get_register_name_expression(R_M) + " + " + std::to_string(displacement);
+                } break;
 
-                    case 0b1:
-                        output_stream << register_name << ", " << "[" << memory_address << "]";
-                        break;
-
-                    default:
-                        assert(!"Invalid D value.");
-                }
+                default:
+                    assert(!"Invalid code path.");
+                    return "";
             }
-            else if (MOD == 0b10)
-            {
-                const uint16_t displacement = (static_cast<uint16_t>(code_ptr[3]) << 8) | static_cast<uint16_t>(code_ptr[2]);
 
-                instruction_size += 2;
+            return "[" + result + "]";
+        };
 
-                const std::string register_name = get_register_name(REG, W == 0b0);
-                const std::string memory_address = get_effective_address_calculation(R_M);
-
-                switch (static_cast<uint8_t>(D))
-                {
-                    case 0b0:
-                        output_stream << "[" << memory_address << " + " << std::to_string(displacement) << "]" << ", " << register_name;
-                        break;
-
-                    case 0b1:
-                        output_stream << register_name << ", " << "[" << memory_address << " + " << std::to_string(displacement) << "]";
-                        break;
-
-                    default:
-                        assert(!"Invalid D value.");
-                }
-            }
-            else if (MOD == 0b11)
-            {
-                // NOTE: It just so happens that for MOD 11 (register-to-register mode) both REG and R/M fields are mapped to the same register names, thus
-                // we can use the same lambda.
-                const std::string R_M_register_name = get_register_name(R_M, W == 0b0);
-                const std::string REG_register_name = get_register_name(REG, W == 0b0);
-
-                switch (static_cast<uint8_t>(D))
-                {
-                    case 0b0:
-                        output_stream << R_M_register_name << ", " << REG_register_name;
-                        break;
-
-                    case 0b1:
-                        output_stream << REG_register_name << ", " << R_M_register_name;
-                        break;
-
-                    default:
-                        assert(!"Invalid D value.");
-                }
-            }
-            else
-            {
-                std::cout << "[ERROR]: Unknown MOD value." << std::endl;
-                return -1;
-            }
-        }
-        else if (((code_ptr[0] >> 1) & 0b1111111) == 0b1100011) // Immediate to register/memory
+        auto get_immediate_value = [&instruction_stream](const uint8_t W) -> uint16_t
         {
-            // w is gonna tell me whether to write the word "byte" or "word" in the output disassembly.
-            // const uint8_t W = code_ptr[0] & 0b1;
-            assert(false);
-        }
-        else if (((code_ptr[0] >> 4) & 0b1111)== 0b1011) // Immediate to register
-        {
-            instruction_size += 2;
-
-            const uint8_t W = static_cast<uint8_t>((code_ptr[0] >> 3) & 0b1);
-            const uint8_t REG = static_cast<uint8_t>(code_ptr[0] & 0b111);
-
-            const std::string register_name = get_register_name(REG, W == 0);
-
-            uint16_t immediate_value = 0;
-
             switch (W)
             {
                 case 0b0:
                 {
-                    immediate_value = static_cast<uint16_t>(code_ptr[1]);
-                } break;
+                    const uint8_t immediate_value = *instruction_stream++;
+                    return immediate_value;
+                };
 
                 case 0b1:
                 {
-                    immediate_value = (static_cast<uint16_t>(code_ptr[2]) << 8) | static_cast<uint16_t>(code_ptr[1]);
-                    instruction_size += 1;
-                } break;
+                    const uint16_t lo = static_cast<uint16_t>(*instruction_stream++);
+                    const uint16_t hi = static_cast<uint16_t>(*instruction_stream++);
+                    const uint16_t immediate_value = (hi << 8) | lo;
+                    return immediate_value;
+                }
 
                 default:
-                    assert(!"Invalid W value.");
+                    assert(!"Invalid code path.");
+                    return UINT16_MAX;
             }
+        };
 
-            output_stream << register_name << ", " << std::to_string(immediate_value);
+        const uint8_t opcode_byte = *instruction_stream++;
+        if (((opcode_byte >> 2) & 0b111111) == 0b100010) // Register/memory to/from register
+        {
+            // NOTE: This case should handle instructions of the form:
+            // 1. Register to register move:    mov al, bl
+            // 2. Register to memory move:      mov [bx + di], cx
+            // 3. Memory to register move:      mov cx, [bx + di]
+
+            const uint8_t D     = (opcode_byte >> 1) & 0b1;
+            const uint8_t W     = opcode_byte        & 0b1;
+
+            const uint8_t mod_reg_r_m_byte = *instruction_stream++;
+            const uint8_t MOD   = (mod_reg_r_m_byte >> 6) & 0b11;
+            const uint8_t REG   = (mod_reg_r_m_byte >> 3) & 0b111;
+            const uint8_t R_M   = mod_reg_r_m_byte        & 0b111;
+
+            std::string src = get_register_name(REG, W == 0b0);
+            std::string dst = (MOD == 0b11) ? get_register_name(R_M, W == 0b0) : get_memory_address_expression(MOD, R_M);
+
+            if (static_cast<uint8_t>(D) == 0b1)
+                std::swap(src, dst);
+            else if (static_cast<uint8_t>(D) != 0b0)
+                assert(!"Invalid D value.");
+
+            output_stream << dst << ", " << src;
         }
-        else if (((code_ptr[0] >> 1) & 0b1111111) == 0b1010000) // Memory to accumulator
+        else if (((opcode_byte >> 1) & 0b1111111) == 0b1100011) // Immediate to register/memory
+        {
+            // NOTE: This case should handle instructions of the form:
+            // mov [reg + displacement], size immediate
+
+            const uint8_t W = opcode_byte & 0b1;
+            const std::string size_expression = (W == 0b0) ? "byte" : "word";
+
+            const uint8_t mod_reg_r_m_byte = *instruction_stream++;
+            const uint8_t MOD = (mod_reg_r_m_byte >> 6) & 0b11;
+            assert(MOD != 0b11); // This instruction shouldn't be able to support register-to-register mode.
+
+#ifdef _DEBUG
+            // NOTE: Technically there is no REG field in this instruction, it is always 0b000.
+            const uint8_t REG = (mod_reg_r_m_byte >> 3) & 0b111;
+            assert(REG == 0b000);
+#endif
+            const uint8_t R_M = mod_reg_r_m_byte & 0b111;
+
+            const std::string dst = get_memory_address_expression(MOD, R_M);
+
+            output_stream << dst << ", " << size_expression << " " << std::to_string(get_immediate_value(W));
+        }
+        else if (((opcode_byte >> 4) & 0b1111)== 0b1011) // Immediate to register
+        {
+            const uint8_t W = static_cast<uint8_t>((opcode_byte >> 3) & 0b1);
+            const uint8_t REG = static_cast<uint8_t>(opcode_byte & 0b111);
+
+            const std::string register_name = get_register_name(REG, W == 0);
+
+            output_stream << register_name << ", " << std::to_string(get_immediate_value(W));
+        }
+        else if (((instruction_stream[0] >> 1) & 0b1111111) == 0b1010000) // Memory to accumulator
         {
             assert(false);
         }
-        else if (((code_ptr[0] >> 1) & 0b1111111) == 0b1010001) // Accumulator to memory
+        else if (((instruction_stream[0] >> 1) & 0b1111111) == 0b1010001) // Accumulator to memory
         {
             assert(false);
         }
@@ -289,7 +259,6 @@ int main(int argc, char** argv)
         }
 
         output_stream << "\n";
-        code_ptr += instruction_size;
     }
 
     const char* out_file_path;
