@@ -55,8 +55,6 @@ int main(int argc, char** argv)
 
     while (instruction_stream != assembled_code.data() + assembled_code.size())
     {
-        output_stream << "mov ";
-
         auto get_register_name = [](const uint8_t predicate, const bool is_not_wide) -> std::string
         {
             switch (predicate)
@@ -187,12 +185,13 @@ int main(int argc, char** argv)
         };
 
         const uint8_t opcode_byte = *instruction_stream++;
-        if (((opcode_byte >> 2) & 0b111111) == 0b100010) // Register/memory to/from register
+        uint8_t opcode = (opcode_byte >> 2) & 0b111111;
+        if ((opcode == 0b100010) || (opcode == 0b000000) || (opcode == 0b001010) || (opcode == 0b001110)) // Register/memory to/from register
         {
             // NOTE: This case should handle instructions of the form:
-            // 1. Register to register move:    mov al, bl
-            // 2. Register to memory move:      mov [bx + di], cx
-            // 3. Memory to register move:      mov cx, [bx + di]
+            // {mov/add/sub/cmp} al, bl
+            // {mov/add/sub/cmp} [bx + di], cx
+            // {mov/add/sub/cmp} cx, [bx + di]
 
             const uint8_t D     = (opcode_byte >> 1) & 0b1;
             const uint8_t W     = opcode_byte        & 0b1;
@@ -210,7 +209,26 @@ int main(int argc, char** argv)
             else if (static_cast<uint8_t>(D) != 0b0)
                 assert(!"Invalid D value.");
 
-            output_stream << dst << ", " << src;
+            std::string instruction_mnemonic;
+            switch (opcode)
+            {
+                case 0b100010:
+                    instruction_mnemonic = "mov";
+                    break;
+                case 0b000000:
+                    instruction_mnemonic = "add";
+                    break;
+                case 0b001010:
+                    instruction_mnemonic = "sub";
+                    break;
+                case 0b001110:
+                    instruction_mnemonic = "cmp";
+                    break;
+                default:
+                    assert(!"Invalid code path.");
+            }
+
+            output_stream << instruction_mnemonic << " " << dst << ", " << src;
         }
         else if (((opcode_byte >> 1) & 0b1111111) == 0b1100011) // Immediate to register/memory
         {
@@ -233,7 +251,7 @@ int main(int argc, char** argv)
 
             const std::string dst = get_memory_address_expression(MOD, R_M);
 
-            output_stream << dst << ", " << size_expression << " " << std::to_string(get_immediate_value(W));
+            output_stream << "mov " << dst << ", " << size_expression << " " << std::to_string(get_immediate_value(W));
         }
         else if (((opcode_byte >> 4) & 0b1111)== 0b1011) // Immediate to register
         {
@@ -242,7 +260,7 @@ int main(int argc, char** argv)
 
             const std::string register_name = get_register_name(REG, W == 0);
 
-            output_stream << register_name << ", " << std::to_string(get_immediate_value(W));
+            output_stream << "mov " << register_name << ", " << std::to_string(get_immediate_value(W));
         }
         else if (((opcode_byte >> 1) & 0b1111111) == 0b1010000) // Memory to accumulator
         {
@@ -253,7 +271,7 @@ int main(int argc, char** argv)
             const uint16_t addr_hi = static_cast<uint16_t>(*instruction_stream++);
             const uint16_t addr = (addr_hi << 8) | addr_lo;
             
-            output_stream << register_name << ", " << "[" << std::to_string(addr) << "]";
+            output_stream << "mov " << register_name << ", " << "[" << std::to_string(addr) << "]";
         }
         else if (((opcode_byte >> 1) & 0b1111111) == 0b1010001) // Accumulator to memory
         {
@@ -264,7 +282,7 @@ int main(int argc, char** argv)
             const uint16_t addr_hi = static_cast<uint16_t>(*instruction_stream++);
             const uint16_t addr = (addr_hi << 8) | addr_lo;
 
-            output_stream << "[" << std::to_string(addr) << "]" << ", " << register_name;
+            output_stream << "mov " << "[" << std::to_string(addr) << "]" << ", " << register_name;
         }
         else
         {
