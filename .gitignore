@@ -1,9 +1,11 @@
 build/
 .vs/
 .vscode/
+tests/
 
 *.asm
 *.sln
+*.txt
 
 listing_*
 out_listing_*
