@@ -164,7 +164,7 @@ int main(int argc, char** argv)
             return "[" + result + "]";
         };
 
-        auto get_immediate_value = [&instruction_stream](const uint8_t S, const uint8_t W) -> std::string
+        auto get_immediate_expression = [&instruction_stream](const uint8_t S, const uint8_t W) -> std::string
         {
             if (S == 0b0 && W == 0b0)
             {
@@ -182,7 +182,7 @@ int main(int argc, char** argv)
             {
                 const int8_t immediate_value = static_cast<int8_t>(*instruction_stream++);
 
-                // Sign-extensions
+                // Sign-extension
                 if (immediate_value >= 0)
                     return std::to_string(immediate_value);
                 else
@@ -241,11 +241,24 @@ int main(int argc, char** argv)
 
             output_stream << instruction_mnemonic << " " << dst << ", " << src;
         }
-        else if ((((opcode_byte >> 1) & 0b1111111) == 0b1100011) /*mov*/ || (((opcode_byte >> 2) & 0b111111) == 0b100000) /*add/sub/cmp*/) // Immediate to register/memory
+        else if ((((opcode_byte >> 1) & 0b1111111) == 0b1100011)) // mov, Immediate to register/memory
         {
-            // NOTE: This case should handle instructions of the form:
-            // {mov/add/sub/cmp} [bp + di + 25], word 34
+            const uint8_t W = opcode_byte & 0b1;
+            const uint8_t mod_extra_opcode_r_m_byte = *instruction_stream++;
+            const uint8_t MOD = (mod_extra_opcode_r_m_byte >> 6) & 0b11;
+            const uint8_t R_M = mod_extra_opcode_r_m_byte & 0b111;
 
+            const std::string size_expression = (W == 0b0) ? "byte" : "word";
+
+            // NOTE: This is weird because the instruction manual says that this category is "Immediate to register/memory" but none of my immediate to register
+            // mov instruction have ever fallen into this category.
+            assert((MOD != 0b11) && "Moving an immediate to register shouldn't fall in this category.");
+
+            const std::string dst = get_memory_address_expression(MOD, R_M);
+            output_stream << "mov" << " " << dst << ", " << size_expression << " " << get_immediate_expression(0b0, W);
+        }
+        else if (((opcode_byte >> 2) & 0b111111) == 0b100000) // add/sub/cmp, Immediate to register/memory
+        {
             const uint8_t S = (opcode_byte >> 1) & 0b1;
             const uint8_t W = opcode_byte & 0b1;
             assert((W == 0b1) || ((W == 0b0) && (S != 0b1)) && "You cannot sign extend 8 bit to 16 bit if the instruction doesn't operate on 16 bits of data.");
@@ -256,37 +269,22 @@ int main(int argc, char** argv)
             const uint8_t extra_opcode = (mod_extra_opcode_r_m_byte >> 3) & 0b111;
 
             std::string instruction_mnemonic = "";
-            if (((opcode_byte >> 1) & 0b1111111) == 0b1100011)
+            switch (extra_opcode)
             {
-                instruction_mnemonic = "mov";
+                case 0b000:
+                    instruction_mnemonic = "add";
+                    break;
 
-                // NOTE: This is weird because the instruction manual says that this category is "Immediate to register/memory" but none of my immediate to register
-                // mov instruction have ever fallen into this category.
-                assert(MOD != 0b11 && "Moving an immediate to register shouldn't fall in this category.");
-            }
-            else if (((opcode_byte >> 2) & 0b111111) == 0b100000)
-            {
-                switch (extra_opcode)
-                {
-                    case 0b000:
-                        instruction_mnemonic = "add";
-                        break;
+                case 0b101:
+                    instruction_mnemonic = "sub";
+                    break;
 
-                    case 0b101:
-                        instruction_mnemonic = "sub";
-                        break;
+                case 0b111:
+                    instruction_mnemonic = "cmp";
+                    break;
 
-                    case 0b111:
-                        instruction_mnemonic = "cmp";
-                        break;
-
-                    default:
-                        assert(!"Invalid code path.");
-                }
-            }
-            else
-            {
-                assert(!"Invalid code path.");
+                default:
+                    assert(!"Invalid code path.");
             }
             
             const uint8_t R_M = mod_extra_opcode_r_m_byte & 0b111;
@@ -294,14 +292,14 @@ int main(int argc, char** argv)
             if (MOD == 0b11)
             {
                 const std::string dst = get_register_name(R_M, W);
-                output_stream << instruction_mnemonic << " " << dst << ", " << get_immediate_value(S, W);
+                output_stream << instruction_mnemonic << " " << dst << ", " << get_immediate_expression(S, W);
             }
             else
             {
                 const std::string size_expression = (W == 0b0) ? "byte" : "word";
 
                 const std::string dst = get_memory_address_expression(MOD, R_M);
-                output_stream << instruction_mnemonic << " " << dst << ", " << size_expression << " " << get_immediate_value(S, W);
+                output_stream << instruction_mnemonic << " " << dst << ", " << size_expression << " " << get_immediate_expression(S, W);
             }
         }
         else if (((opcode_byte >> 4) & 0b1111)== 0b1011) // Immediate to register
@@ -313,7 +311,7 @@ int main(int argc, char** argv)
 
             // NOTE: We don't want any sign-extension in a mov instruction because it just copies the bit pattern
             // doesn't matter if I'my copying the bit pattern of -34 or 65502 because they are exactly the same in 16 bits.
-            output_stream << "mov " << register_name << ", " << get_immediate_value(0b0, W);
+            output_stream << "mov " << register_name << ", " << get_immediate_expression(0b0, W);
         }
         else if (((opcode_byte >> 1) & 0b1111111) == 0b1010000) // Memory to accumulator
         {
