@@ -195,6 +195,16 @@ int main(int argc, char** argv)
             }
         };
 
+        auto get_jump_displacement_expression = [&instruction_stream]() -> std::string
+        {
+            // NOTE: NASM will add a -2 by itself to the displacement so add 2 to counter.
+            const int8_t displacement = static_cast<int8_t>(*instruction_stream++) + 2;
+            if (displacement >= 0)
+                return "$+" + std::to_string(displacement);
+            else
+                return "$" + std::to_string(displacement);
+        };
+
         const uint8_t opcode_byte = *instruction_stream++;
         uint8_t opcode = (opcode_byte >> 2) & 0b111111;
         if ((opcode == 0b100010) || (opcode == 0b000000) || (opcode == 0b001010) || (opcode == 0b001110)) // Register/memory to/from register
@@ -257,6 +267,39 @@ int main(int argc, char** argv)
             const std::string dst = get_memory_address_expression(MOD, R_M);
             output_stream << "mov" << " " << dst << ", " << size_expression << " " << get_immediate_expression(0b0, W);
         }
+        else if (((opcode_byte >> 4) & 0b1111)== 0b1011) // mov, Immediate to register
+        {
+            const uint8_t W = static_cast<uint8_t>((opcode_byte >> 3) & 0b1);
+            const uint8_t REG = static_cast<uint8_t>(opcode_byte & 0b111);
+
+            const std::string register_name = get_register_name(REG, W);
+
+            // NOTE: We don't want any sign-extension in a mov instruction because it just copies the bit pattern
+            // doesn't matter if I'my copying the bit pattern of -34 or 65502 because they are exactly the same in 16 bits.
+            output_stream << "mov " << register_name << ", " << get_immediate_expression(0b0, W);
+        }
+        else if (((opcode_byte >> 1) & 0b1111111) == 0b1010000) // mov, Memory to accumulator
+        {
+            const uint8_t W = opcode_byte & 0b1;
+            const std::string register_name = (W == 0b0) ? "al" : "ax";
+
+            const uint16_t addr_lo = static_cast<uint16_t>(*instruction_stream++);
+            const uint16_t addr_hi = static_cast<uint16_t>(*instruction_stream++);
+            const uint16_t addr = (addr_hi << 8) | addr_lo;
+            
+            output_stream << "mov " << register_name << ", " << "[" << std::to_string(addr) << "]";
+        }
+        else if (((opcode_byte >> 1) & 0b1111111) == 0b1010001) // mov, Accumulator to memory
+        {
+            const uint8_t W = opcode_byte & 0b1;
+            const std::string register_name = (W == 0b0) ? "al" : "ax";
+
+            const uint16_t addr_lo = static_cast<uint16_t>(*instruction_stream++);
+            const uint16_t addr_hi = static_cast<uint16_t>(*instruction_stream++);
+            const uint16_t addr = (addr_hi << 8) | addr_lo;
+
+            output_stream << "mov " << "[" << std::to_string(addr) << "]" << ", " << register_name;
+        }
         else if (((opcode_byte >> 2) & 0b111111) == 0b100000) // add/sub/cmp, Immediate to register/memory
         {
             const uint8_t S = (opcode_byte >> 1) & 0b1;
@@ -302,38 +345,104 @@ int main(int argc, char** argv)
                 output_stream << instruction_mnemonic << " " << dst << ", " << size_expression << " " << get_immediate_expression(S, W);
             }
         }
-        else if (((opcode_byte >> 4) & 0b1111)== 0b1011) // Immediate to register
+        // TODO: I can probably compress the following three blocks (for add, sub, and cmp) into one.
+        else if (((opcode_byte >> 1) & 0b1111111) == 0b0000010) // add, Immediate to accumulator
         {
-            const uint8_t W = static_cast<uint8_t>((opcode_byte >> 3) & 0b1);
-            const uint8_t REG = static_cast<uint8_t>(opcode_byte & 0b111);
-
-            const std::string register_name = get_register_name(REG, W);
-
-            // NOTE: We don't want any sign-extension in a mov instruction because it just copies the bit pattern
-            // doesn't matter if I'my copying the bit pattern of -34 or 65502 because they are exactly the same in 16 bits.
-            output_stream << "mov " << register_name << ", " << get_immediate_expression(0b0, W);
+            const uint8_t W = (opcode_byte & 0b1);
+            const std::string dst = get_register_name(0b000, W);
+            output_stream << "add " << dst << ", " << get_immediate_expression(0b0, W);
         }
-        else if (((opcode_byte >> 1) & 0b1111111) == 0b1010000) // Memory to accumulator
+        else if (((opcode_byte >> 1) & 0b1111111) == 0b0010110) // sub, Immediate to accumulator
         {
-            const uint8_t W = opcode_byte & 0b1;
-            const std::string register_name = (W == 0b0) ? "al" : "ax";
-
-            const uint16_t addr_lo = static_cast<uint16_t>(*instruction_stream++);
-            const uint16_t addr_hi = static_cast<uint16_t>(*instruction_stream++);
-            const uint16_t addr = (addr_hi << 8) | addr_lo;
-            
-            output_stream << "mov " << register_name << ", " << "[" << std::to_string(addr) << "]";
+            const uint8_t W = (opcode_byte & 0b1);
+            const std::string dst = get_register_name(0b000, W);
+            output_stream << "sub " << dst << ", " << get_immediate_expression(0b0, W);
         }
-        else if (((opcode_byte >> 1) & 0b1111111) == 0b1010001) // Accumulator to memory
+        else if (((opcode_byte >> 1) & 0b1111111) == 0b0011110) // cmp, Immediate to accumulator
         {
-            const uint8_t W = opcode_byte & 0b1;
-            const std::string register_name = (W == 0b0) ? "al" : "ax";
-
-            const uint16_t addr_lo = static_cast<uint16_t>(*instruction_stream++);
-            const uint16_t addr_hi = static_cast<uint16_t>(*instruction_stream++);
-            const uint16_t addr = (addr_hi << 8) | addr_lo;
-
-            output_stream << "mov " << "[" << std::to_string(addr) << "]" << ", " << register_name;
+            const uint8_t W = (opcode_byte & 0b1);
+            const std::string dst = get_register_name(0b000, W);
+            output_stream << "cmp " << dst << ", " << get_immediate_expression(0b0, W);
+        }
+        else if (opcode_byte == 0b01110100 ) // jz/je
+        {
+            output_stream << "jz " << get_jump_displacement_expression();
+        }
+        else if (opcode_byte == 0b01111100) // jl/jnge
+        {
+            output_stream << "jl " << get_jump_displacement_expression();
+        }
+        else if (opcode_byte == 0b01111110) // jle/jng
+        {
+            output_stream << "jle " << get_jump_displacement_expression();
+        }
+        else if (opcode_byte == 0b01110010) // jb/jnae
+        {
+            output_stream << "jb " << get_jump_displacement_expression();
+        }
+        else if (opcode_byte == 0b01110110) // jbe/jna
+        {
+            output_stream << "jbe " << get_jump_displacement_expression();
+        }
+        else if (opcode_byte == 0b01111010) // jp/jpe
+        {
+            output_stream << "jp " << get_jump_displacement_expression();
+        }
+        else if (opcode_byte == 0b01110000) // jo
+        {
+            output_stream << "jo " << get_jump_displacement_expression();
+        }
+        else if (opcode_byte == 0b01111000) // js
+        {
+            output_stream << "js " << get_jump_displacement_expression();
+        }
+        else if (opcode_byte == 0b01110101) // jnz/jne
+        {
+            output_stream << "jnz " << get_jump_displacement_expression();
+        }
+        else if (opcode_byte == 0b01111101) // jnl/jge
+        {
+            output_stream << "jnl " << get_jump_displacement_expression();
+        }
+        else if (opcode_byte == 0b01111111) // jnle/jg
+        {
+            output_stream << "jnle " << get_jump_displacement_expression();
+        }
+        else if (opcode_byte == 0b01110011) // jnb/jae
+        {
+            output_stream << "jnb " << get_jump_displacement_expression();
+        }
+        else if (opcode_byte == 0b01110111) // jnbe/ja
+        {
+            output_stream << "jnbe " << get_jump_displacement_expression();
+        }
+        else if (opcode_byte == 0b01111011) // jnp/jpo
+        {
+            output_stream << "jnp " << get_jump_displacement_expression();
+        }
+        else if (opcode_byte == 0b01110001) // jno
+        {
+            output_stream << "jno " << get_jump_displacement_expression();
+        }
+        else if (opcode_byte == 0b01111001) // jns
+        {
+            output_stream << "jns " << get_jump_displacement_expression();
+        }
+        else if (opcode_byte == 0b11100010) // loop
+        {
+            output_stream << "loop " << get_jump_displacement_expression();
+        }
+        else if (opcode_byte == 0b11100001) // loopz/loope
+        {
+            output_stream << "loopz " << get_jump_displacement_expression();
+        }
+        else if (opcode_byte == 0b11100000) // loopnz/loopne
+        {
+            output_stream << "loopnz " << get_jump_displacement_expression();
+        }
+        else if (opcode_byte == 0b11100011) // jcxz
+        {
+            output_stream << "jcxz " << get_jump_displacement_expression();
         }
         else
         {
