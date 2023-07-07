@@ -3,8 +3,7 @@ if not exist build mkdir build
 
 pushd build
 
-REM Specifying unwind semantics (-EHsc) because I use C++ STL which use exceptions.
-cl -nologo -EHsc -W4 -WX -wd4100 -MP -std:c++20 -Od -Zi ../src/main.cpp
+cl -nologo -W4 -WX -wd4100 -MP -Od -Zi ../src/main.c
 
 echo Build complete.
 
