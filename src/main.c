@@ -135,7 +135,7 @@ sim8086_internal __forceinline op_kind_t get_op_kind(uint8_t opcode, uint8_t ext
 {
     switch (opcode)
     {
-        case 0b10010:
+        case 0b100010:
         case 0b1100011:
         case 0b1011:
         case 0b1010000:
@@ -214,7 +214,6 @@ sim8086_internal __forceinline op_kind_t get_op_kind(uint8_t opcode, uint8_t ext
             return op_kind_jcxz;
 
         default:
-            assert(false);
             return op_kind_count;
     }
 }
@@ -240,28 +239,24 @@ sim8086_internal instruction_operand_t get_register_operand(uint8_t index, bool 
     {
         case 0b000:
         {
-            assert(!is_wide);
             result.payload.reg.name     = register_name_a;
             result.payload.reg.offset   = 0;
         } break;
 
         case 0b001:
         {
-            assert(!is_wide);
             result.payload.reg.name     = register_name_c;
             result.payload.reg.offset   = 0;
         } break;
 
         case 0b010:
         {
-            assert(!is_wide);
             result.payload.reg.name     = register_name_d;
             result.payload.reg.offset   = 0;
         } break;
 
         case 0b011:
         {
-            assert(!is_wide);
             result.payload.reg.name     = register_name_b;
             result.payload.reg.offset   = 0;
         } break;
@@ -590,7 +585,7 @@ int main(int argc, char **argv)
     const char *in_file_path;
     if (argc == 1)
     {
-        printf("No input file provided. Using the default one.\n");
+        printf("[INFO]:\tNo input file provided. Using the default one.\n");
         in_file_path = "tests/listing_0037_single_register_mov";
     }
     else
@@ -598,7 +593,7 @@ int main(int argc, char **argv)
         in_file_path = argv[1];
     }
 
-    printf("[INFO]: Input file: %s\n", in_file_path);
+    printf("[INFO]:\tInput file: %s\n", in_file_path);
 
     uint32_t assembled_code_size = 0;
     uint8_t *assembled_code = NULL;
@@ -664,15 +659,20 @@ int main(int argc, char **argv)
 
         const uint8_t opcode_byte = *instruction_ptr++;
 
-        bool op_code_found = true;
+        bool op_code_found = false;
         for (uint8_t opcode_bit_count = MaxOPCodeBitCount; opcode_bit_count >= MinOPCodeBitCount; --opcode_bit_count)
         {
             const uint8_t opcode = bitfield_extract(opcode_byte, 8-opcode_bit_count, opcode_bit_count);
             decoded_instruction.op_kind = get_op_kind(opcode, 0xFF);
 
+            if (decoded_instruction.op_kind == op_kind_count)
+                continue;
+
+            op_code_found = true;
+
             switch (opcode)
             {
-                case 0b10010:   // mov, Register/memory to/from register
+                case 0b100010:   // mov, Register/memory to/from register
                 case 0b000000:  // add, Register/memroy to/from register
                 case 0b001010:  // sub, Register/memory to/from register
                 case 0b001110:  // cmp, Register/memory to/from register
@@ -787,11 +787,10 @@ int main(int argc, char **argv)
                 } break;
 
                 default:
-                    op_code_found = false;
+                    assert(false);
                     continue;
             }
             
-            op_code_found = true;
             break;
         }
 
@@ -800,7 +799,6 @@ int main(int argc, char **argv)
             printf("[ERROR]:\tUnknown opcode\n");
             return -1;
         }
-        assert(decoded_instruction.op_kind != op_kind_count && "The op_type should have been set by now.");
 
         printf("%s ", op_mnemonic_table[decoded_instruction.op_kind]);
 
