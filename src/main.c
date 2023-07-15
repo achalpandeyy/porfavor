@@ -1,3 +1,5 @@
+#include "core_logger.h"
+
 // TODO: Move to build.bat
 #define SIM8086_DEBUG
 
@@ -7,11 +9,6 @@
 
 #define sim8086_swap(a, b, type) { type temp = a; a = b; b = temp; }
 
-#define _CRT_SECURE_NO_WARNINGS
-#include <assert.h>
-#include <stdint.h>
-#include <stdbool.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -585,7 +582,6 @@ int main(int argc, char **argv)
     const char *in_file_path;
     if (argc == 1)
     {
-        printf("[INFO]:\tNo input file provided. Using the default one.\n");
         in_file_path = "tests/listing_0037_single_register_mov";
     }
     else
@@ -593,15 +589,13 @@ int main(int argc, char **argv)
         in_file_path = argv[1];
     }
 
-    printf("[INFO]:\tInput file: %s\n", in_file_path);
-
     uint32_t assembled_code_size = 0;
     uint8_t *assembled_code = NULL;
     {
         FILE *file = fopen(in_file_path, "rb");
         if (!file)
         {
-            printf("[ERROR]:\nCould not read file:\t%s\n", in_file_path);
+            core_logger_log(core_logger_level_fatal, "Could not read file: %s", in_file_path);
             return -1;
         }
 
@@ -796,7 +790,7 @@ int main(int argc, char **argv)
 
         if (!op_code_found)
         {
-            printf("[ERROR]:\tUnknown opcode\n");
+            core_logger_log(core_logger_level_fatal, "Unknown opcode");
             return -1;
         }
 
