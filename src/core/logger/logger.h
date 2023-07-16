@@ -1,9 +1,9 @@
 #ifndef CORE_LOGGER_H
 #define CORE_LOGGER_H
 
-#include "core.h"
+#include "../core.h"
 
-#ifndef CORE_LOGGER_NO_IMPLEMENTATION
+#ifndef CORE_LOGGER_NO_IMPL
 #define core_logger_api static
 #else
 // NOTE: So that the C++ compiler doesn't mangle the names of functions.
@@ -35,8 +35,8 @@ typedef enum
 
 core_logger_api void core_logger_log(core_logger_level_t level, const char *format, ...);
 
-#ifndef CORE_LOGGER_NO_IMPLEMENTATION
-#include "core_logger.c"
+#ifndef CORE_LOGGER_NO_IMPL
+#include "logger.c"
 #endif
 
 #endif
