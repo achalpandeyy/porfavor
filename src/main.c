@@ -520,7 +520,7 @@ static void print_immediate(immediate_operand_t op, const char *size_expression)
             len += chars_written;
         }
         
-        assert(len < sim8086_array_count(expression));
+        assert(len < core_array_count(expression));
         expression[len] = '\0';
     }
     
@@ -537,7 +537,7 @@ static void print_relative_jump_immediate(relative_jump_immediate_operand_t op)
         const uint8_t chars_written = print_signed_constant(op.value, expression+len);
         len += chars_written;
         
-        assert(len < sim8086_array_count(expression));
+        assert(len < core_array_count(expression));
         expression[len] = '\0';
     }
     
@@ -648,7 +648,7 @@ int main(int argc, char **argv)
         "loopnz",
         "jcxz"
     };
-    assert(sim8086_array_count(op_mnemonic_table) == op_kind_count);
+    assert(core_array_count(op_mnemonic_table) == op_kind_count);
     
     while (instruction_ptr != assembled_code + assembled_code_size)
     {
