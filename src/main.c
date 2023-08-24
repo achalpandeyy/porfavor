@@ -1,6 +1,7 @@
 #include "core/logger/logger.h"
 
-#define LOG_FATAL(fmt, ...) core_logger_log(core_logger_level_fatal, ##__VA_ARGS__)
+#define LOG_FATAL(fmt, ...) core_logger_log(core_logger_level_fatal, fmt, ##__VA_ARGS__)
+#define LOG_ERROR(fmt, ...) core_logger_log(core_logger_level_error, fmt, ##__VA_ARGS__)
 
 #include <stdlib.h>
 #include <string.h>
@@ -379,6 +380,12 @@ static instruction_operand_t get_relative_jump_immediate_operand(uint8_t **instr
     return result;
 };
 
+#define file_print(file, fmt, ...)\
+{\
+const int retval = fprintf(file, fmt, ##__VA_ARGS__);\
+assert(retval >= 0);\
+}
+
 static uint8_t print_signed_constant(int32_t constant, char *dst)
 {
     assert(constant <= INT16_MAX && constant >= INT16_MIN);
@@ -393,24 +400,24 @@ static uint8_t print_signed_constant(int32_t constant, char *dst)
     return result;
 }
 
-static void print_register_operand(register_operand_t op)
+static void print_register_operand(FILE *file, register_operand_t op)
 {
     switch (op.name)
     {
         case register_name_sp:
-        printf("sp");
+        file_print(file, "sp");
         return;
         
         case register_name_bp:
-        printf("bp");
+        file_print(file, "bp");
         return;
         
         case register_name_si:
-        printf("si");
+        file_print(file, "si");
         return;
         
         case register_name_di:
-        printf("di");
+        file_print(file, "di");
         return;
         
         default:
@@ -449,10 +456,10 @@ static void print_register_operand(register_operand_t op)
     assert(len == 2);
     name[len] = '\0';
     
-    printf("%s", name);
+    file_print(file, "%s", name);
 }
 
-static void print_memory_operand(memory_operand_t op)
+static void print_memory_operand(FILE *file, memory_operand_t op)
 {
     uint8_t len = 0;
     char expression[32];
@@ -501,10 +508,10 @@ static void print_memory_operand(memory_operand_t op)
         expression[len] = '\0';
     }
     
-    printf("%s", expression);
+    file_print(file, "%s", expression);
 }
 
-static void print_immediate(immediate_operand_t op, const char *size_expression)
+static void print_immediate(FILE *file, immediate_operand_t op, const char *size_expression)
 {
     uint8_t len = 0;
     char expression[16];
@@ -524,10 +531,10 @@ static void print_immediate(immediate_operand_t op, const char *size_expression)
         expression[len] = '\0';
     }
     
-    printf("%s", expression);
+    file_print(file, "%s", expression);
 }
 
-static void print_relative_jump_immediate(relative_jump_immediate_operand_t op)
+static void print_relative_jump_immediate(FILE *file, relative_jump_immediate_operand_t op)
 {
     uint8_t len = 0;
     char expression[8];
@@ -541,27 +548,27 @@ static void print_relative_jump_immediate(relative_jump_immediate_operand_t op)
         expression[len] = '\0';
     }
     
-    printf("%s", expression);
+    file_print(file, "%s", expression);
 }
 
-static void print_instruction_operand(instruction_operand_t op, const char *size_expression)
+static void print_instruction_operand(FILE *file, instruction_operand_t op, const char *size_expression)
 {
     switch (op.kind)
     {
         case instruction_operand_kind_register:
-        print_register_operand(op.payload.reg);
+        print_register_operand(file, op.payload.reg);
         break;
         
         case instruction_operand_kind_memory:
-        print_memory_operand(op.payload.mem);
+        print_memory_operand(file, op.payload.mem);
         break;
         
         case instruction_operand_kind_immediate:
-        print_immediate(op.payload.imm, size_expression);
+        print_immediate(file, op.payload.imm, size_expression);
         break;
         
         case instruction_operand_kind_relative_jump_immediate:
-        print_relative_jump_immediate(op.payload.rel_jump_imm);
+        print_relative_jump_immediate(file, op.payload.rel_jump_imm);
         break;
         
         default:
@@ -572,19 +579,6 @@ static void print_instruction_operand(instruction_operand_t op, const char *size
 
 int main(int argc, char **argv)
 {
-    // TODO(achal): Remove.
-    {
-        const char *out_file_path = "output_test.txt";
-        FILE *out_file = fopen(out_file_path, "w");
-        if (!out_file)
-        {
-            LOG_FATAL("Could not open a file for writing: %s", out_file_path);
-            return -1;
-        }
-        
-        int retval = fprintf(out_file, "Hello hello hello\n");
-        assert(retval >= 0);
-    }
     const char *in_file_path;
     if (argc == 1)
     {
@@ -619,7 +613,6 @@ int main(int argc, char **argv)
     assert(assembled_code_size != 0);
     
     uint8_t *instruction_ptr = assembled_code;
-    printf("bits 16\n\n");
     
     const char *op_mnemonic_table[] =
     {
@@ -796,28 +789,41 @@ int main(int argc, char **argv)
         
         if (!op_code_found)
         {
-            core_logger_log(core_logger_level_fatal, "Unknown opcode");
+            LOG_FATAL("Unknown opcode");
             return -1;
         }
         
-        printf("%s ", op_mnemonic_table[decoded_instruction.op_kind]);
-        
-        const char *size_expression = NULL;
-        print_instruction_operand(decoded_instruction.operands[0], size_expression);
-        
-        printf(", ");
-        
-        const bool should_print_size_expression =
-        ((decoded_instruction.operands[0].kind == instruction_operand_kind_memory) && (decoded_instruction.operands[1].kind == instruction_operand_kind_immediate)) ||
-        ((decoded_instruction.operands[0].kind == instruction_operand_kind_immediate) && (decoded_instruction.operands[1].kind == instruction_operand_kind_memory));
-        
-        if (should_print_size_expression)
-            size_expression = (decoded_instruction.w == 0b0) ? "byte" : "word";
-        
-        // TODO(achal): Sometimes we only have a single operand.
-        print_instruction_operand(decoded_instruction.operands[1], size_expression);
-        
-        printf("\n");
+        // Print instruction to file
+        {
+            const char *out_file_path = "tests/output.asm";
+            FILE *out_file = fopen(out_file_path, "w");
+            if (!out_file)
+            {
+                LOG_ERROR("Could not open a file for writing: %s", out_file_path);
+                out_file = stdout;
+            }
+            
+            file_print(out_file, "bits 16\n\n");
+            file_print(out_file, "%s ", op_mnemonic_table[decoded_instruction.op_kind]);
+            
+            print_instruction_operand(out_file, decoded_instruction.operands[0], NULL);
+            
+            file_print(out_file, ", ");
+            
+            const bool should_print_size_expression =
+            ((decoded_instruction.operands[0].kind == instruction_operand_kind_memory) && (decoded_instruction.operands[1].kind == instruction_operand_kind_immediate)) ||
+            ((decoded_instruction.operands[0].kind == instruction_operand_kind_immediate) && (decoded_instruction.operands[1].kind == instruction_operand_kind_memory));
+            
+            const char *size_expression = NULL;
+            if (should_print_size_expression)
+                size_expression = (decoded_instruction.w == 0b0) ? "byte" : "word";
+            
+            // TODO(achal): Sometimes we only have a single operand. So I think I should detect when that
+            // is the case and not call the following function accordingly?
+            print_instruction_operand(out_file, decoded_instruction.operands[1], size_expression);
+            
+            file_print(out_file, "\n");
+        }
     }
     
     return 0;
