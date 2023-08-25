@@ -73,17 +73,17 @@ typedef struct
 
 typedef enum
 {
-    instruction_operand_kind_register = 0,
-    instruction_operand_kind_memory,
-    instruction_operand_kind_immediate,
-    instruction_operand_kind_relative_jump_immediate,
+    instruction_operand_type_register = 0,
+    instruction_operand_type_memory,
+    instruction_operand_type_immediate,
+    instruction_operand_type_relative_jump_immediate,
     
-    instruction_operand_kind_count
-} instruction_operand_kind_t;
+    instruction_operand_type_count
+} instruction_operand_type_t;
 
 typedef struct
 {
-    instruction_operand_kind_t kind;
+    instruction_operand_type_t type;
     union
     {
         register_operand_t reg;
@@ -95,35 +95,35 @@ typedef struct
 
 typedef enum
 {
-    op_kind_mov = 0,
-    op_kind_add,
-    op_kind_sub,
-    op_kind_cmp,
-    op_kind_jz,     // je
-    op_kind_jl,     // jnge
-    op_kind_jle,    // jng
-    op_kind_jb,     // jnae
-    op_kind_jbe,    // jna
-    op_kind_jp,     // jpe
-    op_kind_jo,
-    op_kind_js,
-    op_kind_jnz,    // jne
-    op_kind_jnl,    // jge
-    op_kind_jnle,   // jg
-    op_kind_jnb,    // jae
-    op_kind_jnbe,   // ja
-    op_kind_jnp,    // jpo
-    op_kind_jno,
-    op_kind_jns,
-    op_kind_loop,
-    op_kind_loopz,  // loope
-    op_kind_loopnz, // loopne
-    op_kind_jcxz,
+    op_type_mov = 0,
+    op_type_add,
+    op_type_sub,
+    op_type_cmp,
+    op_type_jz,     // je
+    op_type_jl,     // jnge
+    op_type_jle,    // jng
+    op_type_jb,     // jnae
+    op_type_jbe,    // jna
+    op_type_jp,     // jpe
+    op_type_jo,
+    op_type_js,
+    op_type_jnz,    // jne
+    op_type_jnl,    // jge
+    op_type_jnle,   // jg
+    op_type_jnb,    // jae
+    op_type_jnbe,   // ja
+    op_type_jnp,    // jpo
+    op_type_jno,
+    op_type_jns,
+    op_type_loop,
+    op_type_loopz,  // loope
+    op_type_loopnz, // loopne
+    op_type_jcxz,
     
-    op_kind_count
-} op_kind_t;
+    op_type_count
+} op_type_t;
 
-static __forceinline op_kind_t get_op_kind(uint8_t opcode, uint8_t extra_opcode)
+static __forceinline op_type_t get_op_type(uint8_t opcode, uint8_t extra_opcode)
 {
     switch (opcode)
     {
@@ -132,87 +132,87 @@ static __forceinline op_kind_t get_op_kind(uint8_t opcode, uint8_t extra_opcode)
         case 0b1011:
         case 0b1010000:
         case 0b1010001:
-        return op_kind_mov;
+        return op_type_mov;
         
         case 0b000000:
         case 0b0000010:
-        return op_kind_add;
+        return op_type_add;
         
         case 0b001010:
         case 0b0010110:
-        return op_kind_sub;
+        return op_type_sub;
         
         case 0b001110:
         case 0b0011110:
-        return op_kind_cmp;
+        return op_type_cmp;
         
         case 0b100000:
         {
             switch (extra_opcode)
             {
                 case 0b000:
-                return op_kind_add;
+                return op_type_add;
                 
                 case 0b101:
-                return op_kind_sub;
+                return op_type_sub;
                 
                 case 0b111:
-                return op_kind_cmp;
+                return op_type_cmp;
                 
                 default:
-                return op_kind_count;
+                return op_type_count;
             }
         }
         
         case 0b01110100:
-        return op_kind_jz;
+        return op_type_jz;
         case 0b01111100:
-        return op_kind_jl;
+        return op_type_jl;
         case 0b01111110:
-        return op_kind_jle;
+        return op_type_jle;
         case 0b01110010:
-        return op_kind_jb;
+        return op_type_jb;
         case 0b01110110:
-        return op_kind_jbe;
+        return op_type_jbe;
         case 0b01111010:
-        return op_kind_jp;
+        return op_type_jp;
         case 0b01110000:
-        return op_kind_jo;
+        return op_type_jo;
         case 0b01111000:
-        return op_kind_js;
+        return op_type_js;
         case 0b01110101:
-        return op_kind_jnz;
+        return op_type_jnz;
         case 0b01111101:
-        return op_kind_jnl;
+        return op_type_jnl;
         case 0b01111111:
-        return op_kind_jnle;
+        return op_type_jnle;
         case 0b01110011:
-        return op_kind_jnb;
+        return op_type_jnb;
         case 0b01110111:
-        return op_kind_jnbe;
+        return op_type_jnbe;
         case 0b01111011:
-        return op_kind_jnp;
+        return op_type_jnp;
         case 0b01110001:
-        return op_kind_jno;
+        return op_type_jno;
         case 0b01111001:
-        return op_kind_jns;
+        return op_type_jns;
         case 0b11100010:
-        return op_kind_loop;
+        return op_type_loop;
         case 0b11100001:
-        return op_kind_loopz;
+        return op_type_loopz;
         case 0b11100000:
-        return op_kind_loopnz;
+        return op_type_loopnz;
         case 0b11100011:
-        return op_kind_jcxz;
+        return op_type_jcxz;
         
         default:
-        return op_kind_count;
+        return op_type_count;
     }
 }
 
 typedef struct
 {
-    op_kind_t op_kind;
+    op_type_t op_type;
     uint8_t w;
     
     // NOTE: operands[0] is the the one which appears first in
@@ -224,7 +224,7 @@ typedef struct
 static instruction_operand_t get_register_operand(uint8_t index, bool is_wide)
 {
     instruction_operand_t result = { 0 };
-    result.kind = instruction_operand_kind_register;
+    result.type = instruction_operand_type_register;
     result.payload.reg.count = is_wide ? 2 : 1;
     
     switch (index)
@@ -287,7 +287,7 @@ static instruction_operand_t get_register_operand(uint8_t index, bool is_wide)
 static instruction_operand_t get_memory_operand(uint8_t index, uint8_t mod, uint8_t **instruction_ptr)
 {
     instruction_operand_t result;
-    result.kind = instruction_operand_kind_memory;
+    result.type = instruction_operand_type_memory;
     
     switch (index)
     {
@@ -339,7 +339,7 @@ static instruction_operand_t get_memory_operand(uint8_t index, uint8_t mod, uint
 static instruction_operand_t get_immediate_operand(bool should_sign_extend, bool is_wide, uint8_t **instruction_ptr)
 {
     instruction_operand_t result;
-    result.kind = instruction_operand_kind_immediate;
+    result.type = instruction_operand_type_immediate;
     
     const uint8_t *immediate_data = *instruction_ptr;
     uint8_t immediate_size = 0;
@@ -372,7 +372,7 @@ static instruction_operand_t get_immediate_operand(bool should_sign_extend, bool
 static instruction_operand_t get_relative_jump_immediate_operand(uint8_t **instruction_ptr)
 {
     instruction_operand_t result;
-    result.kind = instruction_operand_kind_relative_jump_immediate;
+    result.type = instruction_operand_type_relative_jump_immediate;
     
     const uint8_t relative_immediate = **instruction_ptr;
     // NOTE: NASM will add a -2 by itself to the displacement so add 2 to counter that.
@@ -554,21 +554,21 @@ static void print_relative_jump_immediate(FILE *file, relative_jump_immediate_op
 
 static void print_instruction_operand(FILE *file, instruction_operand_t op, const char *size_expression)
 {
-    switch (op.kind)
+    switch (op.type)
     {
-        case instruction_operand_kind_register:
+        case instruction_operand_type_register:
         print_register_operand(file, op.payload.reg);
         break;
         
-        case instruction_operand_kind_memory:
+        case instruction_operand_type_memory:
         print_memory_operand(file, op.payload.mem);
         break;
         
-        case instruction_operand_kind_immediate:
+        case instruction_operand_type_immediate:
         print_immediate(file, op.payload.imm, size_expression);
         break;
         
-        case instruction_operand_kind_relative_jump_immediate:
+        case instruction_operand_type_relative_jump_immediate:
         print_relative_jump_immediate(file, op.payload.rel_jump_imm);
         break;
         
@@ -664,7 +664,7 @@ int main(int argc, char **argv)
         "loopnz",
         "jcxz"
     };
-    assert(core_array_count(op_mnemonic_table) == op_kind_count);
+    assert(core_array_count(op_mnemonic_table) == op_type_count);
     
     while (instruction_ptr != assembled_code + assembled_code_size)
     {
@@ -679,9 +679,9 @@ int main(int argc, char **argv)
         for (uint8_t opcode_bit_count = MaxOPCodeBitCount; opcode_bit_count >= MinOPCodeBitCount; --opcode_bit_count)
         {
             const uint8_t opcode = bitfield_extract(opcode_byte, 8-opcode_bit_count, opcode_bit_count);
-            decoded_instruction.op_kind = get_op_kind(opcode, 0xFF);
+            decoded_instruction.op_type = get_op_type(opcode, 0xFF);
             
-            if (decoded_instruction.op_kind == op_kind_count)
+            if (decoded_instruction.op_type == op_type_count)
                 continue;
             
             op_code_found = true;
@@ -719,13 +719,13 @@ int main(int argc, char **argv)
                 {
                     const uint8_t mod_extra_opcode_r_m_byte = *instruction_ptr++;
                     const uint8_t extra_opcode = bitfield_extract(mod_extra_opcode_r_m_byte, 3, 3);
-                    decoded_instruction.op_kind = get_op_kind(opcode, extra_opcode);
+                    decoded_instruction.op_type = get_op_type(opcode, extra_opcode);
                     
                     decoded_instruction.w = bitfield_extract(opcode_byte, 0, 1);
                     const bool is_wide = (decoded_instruction.w == 0b1);
                     
                     const uint8_t s = bitfield_extract(opcode_byte, 1, 1);
-                    const bool should_sign_extend = (decoded_instruction.op_kind == op_kind_mov) ? false : (s == 0b1);
+                    const bool should_sign_extend = (decoded_instruction.op_type == op_type_mov) ? false : (s == 0b1);
                     
                     decoded_instruction.operands[1] = get_immediate_operand(should_sign_extend, is_wide, &instruction_ptr);
                     
@@ -733,7 +733,7 @@ int main(int argc, char **argv)
                     const uint8_t r_m = bitfield_extract(mod_extra_opcode_r_m_byte, 0, 3);
                     if (mod == 0b11)
                     {
-                        assert(decoded_instruction.op_kind != op_kind_mov && "The mov instruction usually doesn't take this path. There is a separate opcode for this for mov.");
+                        assert(decoded_instruction.op_type != op_type_mov && "The mov instruction usually doesn't take this path. There is a separate opcode for this for mov.");
                         decoded_instruction.operands[0] = get_register_operand(r_m, is_wide);
                     }
                     else
@@ -827,15 +827,15 @@ int main(int argc, char **argv)
             }
             
             file_print(out_file, "bits 16\n\n");
-            file_print(out_file, "%s ", op_mnemonic_table[decoded_instruction.op_kind]);
+            file_print(out_file, "%s ", op_mnemonic_table[decoded_instruction.op_type]);
             
             print_instruction_operand(out_file, decoded_instruction.operands[0], NULL);
             
             file_print(out_file, ", ");
             
             const bool should_print_size_expression =
-            ((decoded_instruction.operands[0].kind == instruction_operand_kind_memory) && (decoded_instruction.operands[1].kind == instruction_operand_kind_immediate)) ||
-            ((decoded_instruction.operands[0].kind == instruction_operand_kind_immediate) && (decoded_instruction.operands[1].kind == instruction_operand_kind_memory));
+            ((decoded_instruction.operands[0].type == instruction_operand_type_memory) && (decoded_instruction.operands[1].type == instruction_operand_type_immediate)) ||
+            ((decoded_instruction.operands[0].type == instruction_operand_type_immediate) && (decoded_instruction.operands[1].type == instruction_operand_type_memory));
             
             const char *size_expression = NULL;
             if (should_print_size_expression)
