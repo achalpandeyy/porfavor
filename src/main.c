@@ -1,5 +1,6 @@
 #include "core/logger/logger.h"
 
+#define LOG_DEBUG(fmt, ...) core_logger_log(core_logger_level_debug, fmt, ##__VA_ARGS__)
 #define LOG_FATAL(fmt, ...) core_logger_log(core_logger_level_fatal, fmt, ##__VA_ARGS__)
 #define LOG_ERROR(fmt, ...) core_logger_log(core_logger_level_error, fmt, ##__VA_ARGS__)
 
@@ -579,14 +580,36 @@ static void print_instruction_operand(FILE *file, instruction_operand_t op, cons
 
 int main(int argc, char **argv)
 {
-    const char *in_file_path;
-    if (argc == 1)
+    LOG_DEBUG("argc: %d", argc);
+    const char *in_file_path = NULL;
+    const char *out_file_path = NULL;
+    switch (argc)
     {
-        in_file_path = "tests/listing_0037_single_register_mov";
-    }
-    else
-    {
-        in_file_path = argv[1];
+        case 1:
+        {
+            LOG_FATAL("Usage: porfavor <path_to_asm_file>");
+            return -1;
+        }
+        
+        case 2:
+        {
+            in_file_path = argv[1];
+            out_file_path = "output.asm";
+        } break;
+        
+        case 3:
+        {
+            in_file_path = argv[1];
+            out_file_path = argv[2];
+            LOG_DEBUG("argv[1]: %s", argv[1]);
+            LOG_DEBUG("argv[2]: %s", argv[2]);
+        } break;
+        
+        default:
+        {
+            assert(false);
+            break;
+        }
     }
     
     uint32_t assembled_code_size = 0;
@@ -795,7 +818,7 @@ int main(int argc, char **argv)
         
         // Print instruction to file
         {
-            const char *out_file_path = "tests/output.asm";
+            assert(out_file_path);
             FILE *out_file = fopen(out_file_path, "w");
             if (!out_file)
             {
