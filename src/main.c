@@ -580,7 +580,6 @@ static void print_instruction_operand(FILE *file, instruction_operand_t op, cons
 
 int main(int argc, char **argv)
 {
-    LOG_DEBUG("argc: %d", argc);
     const char *in_file_path = NULL;
     const char *out_file_path = NULL;
     switch (argc)
@@ -601,8 +600,6 @@ int main(int argc, char **argv)
         {
             in_file_path = argv[1];
             out_file_path = argv[2];
-            LOG_DEBUG("argv[1]: %s", argv[1]);
-            LOG_DEBUG("argv[2]: %s", argv[2]);
         } break;
         
         default:
@@ -636,6 +633,18 @@ int main(int argc, char **argv)
     assert(assembled_code_size != 0);
     
     uint8_t *instruction_ptr = assembled_code;
+    
+    // Open the output file
+    FILE *out_file = NULL;
+    {
+        assert(out_file_path);
+        out_file = fopen(out_file_path, "w");
+        if (!out_file)
+        {
+            LOG_ERROR("Could not open a file for writing: %s", out_file_path);
+            out_file = stdout;
+        }
+    }
     
     const char *op_mnemonic_table[] =
     {
@@ -818,13 +827,7 @@ int main(int argc, char **argv)
         
         // Print instruction to file
         {
-            assert(out_file_path);
-            FILE *out_file = fopen(out_file_path, "w");
-            if (!out_file)
-            {
-                LOG_ERROR("Could not open a file for writing: %s", out_file_path);
-                out_file = stdout;
-            }
+            assert(out_file);
             
             file_print(out_file, "bits 16\n\n");
             file_print(out_file, "%s ", op_mnemonic_table[decoded_instruction.op_type]);
