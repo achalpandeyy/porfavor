@@ -438,8 +438,6 @@ assert(retval >= 0);\
 
 static uint8_t print_signed_constant(int32_t constant, char *dst)
 {
-    assert(constant <= INT16_MAX && constant >= INT16_MIN);
-    
     uint8_t result = 0;
     if (constant > 0)
         dst[result++] = '+';
@@ -547,6 +545,8 @@ static void print_memory_operand(FILE *file, memory_operand_t op)
             }
             else if (has_disp)
             {
+                // NOTE(achal): Displacement to memory addresses should always fit in 16 bits.
+                assert(op.displacement <= UINT16_MAX);
                 const uint8_t chars_written = print_signed_constant(op.displacement, expression+len);
                 len += chars_written;
             }
@@ -788,8 +788,6 @@ int main(int argc, char **argv)
                     const uint8_t s = bitfield_extract(opcode_byte, 1, 1);
                     const bool should_sign_extend = (decoded_instruction.op_type == op_type_mov) ? false : (s == 0b1);
                     
-                    decoded_instruction.operands[1] = get_immediate_operand(should_sign_extend, is_wide, &instruction_ptr);
-                    
                     const uint8_t mod = bitfield_extract(mod_extra_opcode_r_m_byte, 6, 2);
                     const uint8_t r_m = bitfield_extract(mod_extra_opcode_r_m_byte, 0, 3);
                     if (mod == 0b11)
@@ -801,6 +799,8 @@ int main(int argc, char **argv)
                     {
                         decoded_instruction.operands[0] = get_memory_operand(r_m, mod, &instruction_ptr);
                     }
+                    
+                    decoded_instruction.operands[1] = get_immediate_operand(should_sign_extend, is_wide, &instruction_ptr);
                 } break;
                 
                 case 0b1011: // mov, Immediate to register
@@ -820,8 +820,8 @@ int main(int argc, char **argv)
                     // NOTE(achal): Assume Memory to accumulator..
                     decoded_instruction.w = bitfield_extract(opcode_byte, 0, 1);
                     
-                    decoded_instruction.operands[1] = get_register_operand(0b000, decoded_instruction.w == 0b1);
-                    decoded_instruction.operands[0] = get_memory_operand(0b110, 0b00, &instruction_ptr);
+                    decoded_instruction.operands[0] = get_register_operand(0b000, decoded_instruction.w == 0b1);
+                    decoded_instruction.operands[1] = get_memory_operand(0b110, 0b00, &instruction_ptr);
                     
                     // NOTE(achal): Swap if it is Accumulator to memory
                     if (opcode == 0b1010001)
