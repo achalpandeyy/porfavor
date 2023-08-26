@@ -5,7 +5,7 @@
 
 export PATH="$PATH:/mnt/c/Program Files/NASM"
 
-build/porfavor.exe "$1" tests/output.asm > /dev/null
+build/porfavor.exe "$1" tests/output.asm
 
 nasm.exe tests/output.asm
 

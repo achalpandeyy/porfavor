@@ -1,5 +1,6 @@
 #include "core/logger/logger.h"
 
+#define LOG_INFO(fmt, ...) core_logger_log(core_logger_level_info, fmt, ##__VA_ARGS__)
 #define LOG_DEBUG(fmt, ...) core_logger_log(core_logger_level_debug, fmt, ##__VA_ARGS__)
 #define LOG_FATAL(fmt, ...) core_logger_log(core_logger_level_fatal, fmt, ##__VA_ARGS__)
 #define LOG_ERROR(fmt, ...) core_logger_log(core_logger_level_error, fmt, ##__VA_ARGS__)
@@ -20,7 +21,8 @@ static int16_t sign_extend_8_to_16(uint8_t value)
     return result;
 }
 
-typedef enum
+typedef enum register_name_t register_name_t;
+enum register_name_t
 {
     register_name_a = 0,
     register_name_c,
@@ -32,16 +34,18 @@ typedef enum
     register_name_di,
     
     register_name_count
-} register_name_t;
+};
 
-typedef struct
+typedef struct register_operand_t register_operand_t;
+struct register_operand_t
 {
     register_name_t name;
     uint8_t offset;
     uint8_t count;
-} register_operand_t;
+};
 
-typedef enum
+typedef enum memory_address_expression_t memory_address_expression_t;
+enum memory_address_expression_t
 {
     memory_address_expression_bx_plus_si = 0,
     memory_address_expression_bx_plus_di,
@@ -49,29 +53,33 @@ typedef enum
     memory_address_expression_bp_plus_di,
     memory_address_expression_si,
     memory_address_expression_di,
-    memory_address_expression_direct_address,
+    memory_address_expression_bp,
     memory_address_expression_bx,
     
     memory_address_expression_count
-} memory_address_expression_t;
+};
 
-typedef struct
+typedef struct memory_operand_t memory_operand_t;
+struct memory_operand_t
 {
     memory_address_expression_t address_expression;
     int32_t displacement; // just 16 bits should do but the compiler will pad it up anyways, so why not just claim the memory
-} memory_operand_t;
+};
 
-typedef struct
+typedef struct immediate_operand_t immediate_operand_t;
+struct immediate_operand_t
 {
     int32_t value;
-} immediate_operand_t;
+};
 
-typedef struct
+typedef struct relative_jump_immediate_operand_t relative_jump_immediate_operand_t;
+struct relative_jump_immediate_operand_t
 {
     int32_t value;
-} relative_jump_immediate_operand_t;
+};
 
-typedef enum
+typedef enum instruction_operand_type_t instruction_operand_type_t;
+enum instruction_operand_type_t
 {
     instruction_operand_type_register = 0,
     instruction_operand_type_memory,
@@ -79,9 +87,10 @@ typedef enum
     instruction_operand_type_relative_jump_immediate,
     
     instruction_operand_type_count
-} instruction_operand_type_t;
+};
 
-typedef struct
+typedef struct instruction_operand_t instruction_operand_t;
+struct instruction_operand_t
 {
     instruction_operand_type_t type;
     union
@@ -91,9 +100,10 @@ typedef struct
         immediate_operand_t imm;
         relative_jump_immediate_operand_t rel_jump_imm;
     } payload;
-} instruction_operand_t;
+};
 
-typedef enum
+typedef enum op_type_t op_type_t;
+enum op_type_t
 {
     op_type_mov = 0,
     op_type_add,
@@ -121,93 +131,124 @@ typedef enum
     op_type_jcxz,
     
     op_type_count
-} op_type_t;
+};
 
-static __forceinline op_type_t get_op_type(uint8_t opcode, uint8_t extra_opcode)
+static __forceinline op_type_t get_op_type(uint8_t opcode, uint8_t extra_opcode, uint32_t bits_to_match)
 {
-    switch (opcode)
+    switch (bits_to_match)
     {
-        case 0b100010:
-        case 0b1100011:
-        case 0b1011:
-        case 0b1010000:
-        case 0b1010001:
-        return op_type_mov;
-        
-        case 0b000000:
-        case 0b0000010:
-        return op_type_add;
-        
-        case 0b001010:
-        case 0b0010110:
-        return op_type_sub;
-        
-        case 0b001110:
-        case 0b0011110:
-        return op_type_cmp;
-        
-        case 0b100000:
+        case 8:
         {
-            switch (extra_opcode)
+            switch (opcode)
             {
-                case 0b000:
+                case 0x74: // 01110100
+                return op_type_jz;
+                case 0x7C: // 01111100
+                return op_type_jl;
+                case 0x7E: // 01111110
+                return op_type_jle;
+                case 0x72: // 01110010
+                return op_type_jb;
+                case 0x76: // 01110110
+                return op_type_jbe;
+                case 0x7A: // 01111010
+                return op_type_jp;
+                case 0x70: // 01110000
+                return op_type_jo;
+                case 0x78: // 01111000
+                return op_type_js;
+                case 0x75: // 01110101
+                return op_type_jnz;
+                case 0x7D: // 01111101
+                return op_type_jnl;
+                case 0x7F: // 01111111
+                return op_type_jnle;
+                case 0x73: // 01110011
+                return op_type_jnb;
+                case 0x77: // 01110111
+                return op_type_jnbe;
+                case 0x7B: // 01111011
+                return op_type_jnp;
+                case 0x71: // 01110001
+                return op_type_jno;
+                case 0x79: // 01111001
+                return op_type_jns;
+                case 0xE2: // 11100010
+                return op_type_loop;
+                case 0xE1: // 11100001
+                return op_type_loopz;
+                case 0xE0: // 11100000
+                return op_type_loopnz;
+                case 0xE3: // 11100011
+                return op_type_jcxz;
+            }
+        } break;
+        
+        case 7:
+        {
+            switch (opcode)
+            {
+                case 0x63: // 1100011
+                case 0x50: // 1010000
+                case 0x51: // 1010001
+                return op_type_mov;
+                
+                case 0x02: // 0000010
                 return op_type_add;
                 
-                case 0b101:
+                case 0x16: // 0010110
                 return op_type_sub;
                 
-                case 0b111:
+                case 0x1C: // 0011110
+                return op_type_cmp;
+            }
+        } break;
+        
+        case 6:
+        {
+            switch (opcode)
+            {
+                case 0x22: // 100010
+                return op_type_mov;
+                
+                case 0x0: // 000000
+                return op_type_add;
+                
+                case 0x0A: // 001010
+                return op_type_sub;
+                
+                case 0x0C: // 001110
                 return op_type_cmp;
                 
-                default:
-                return op_type_count;
+                case 0x20: // 100000
+                {
+                    switch (extra_opcode)
+                    {
+                        case 0x0: // 000
+                        return op_type_add;
+                        
+                        case 0x5: // 101
+                        return op_type_sub;
+                        
+                        case 0x7: // 111
+                        return op_type_cmp;
+                    }
+                }
             }
-        }
+        } break;
         
-        case 0b01110100:
-        return op_type_jz;
-        case 0b01111100:
-        return op_type_jl;
-        case 0b01111110:
-        return op_type_jle;
-        case 0b01110010:
-        return op_type_jb;
-        case 0b01110110:
-        return op_type_jbe;
-        case 0b01111010:
-        return op_type_jp;
-        case 0b01110000:
-        return op_type_jo;
-        case 0b01111000:
-        return op_type_js;
-        case 0b01110101:
-        return op_type_jnz;
-        case 0b01111101:
-        return op_type_jnl;
-        case 0b01111111:
-        return op_type_jnle;
-        case 0b01110011:
-        return op_type_jnb;
-        case 0b01110111:
-        return op_type_jnbe;
-        case 0b01111011:
-        return op_type_jnp;
-        case 0b01110001:
-        return op_type_jno;
-        case 0b01111001:
-        return op_type_jns;
-        case 0b11100010:
-        return op_type_loop;
-        case 0b11100001:
-        return op_type_loopz;
-        case 0b11100000:
-        return op_type_loopnz;
-        case 0b11100011:
-        return op_type_jcxz;
+        case 5:
+        {
+        } break;
         
-        default:
-        return op_type_count;
+        case 4:
+        {
+            case 0x11: // 1011
+            return op_type_mov;
+        } break;
     }
+    
+    return op_type_count;
 }
 
 typedef struct
@@ -284,12 +325,14 @@ static instruction_operand_t get_register_operand(uint8_t index, bool is_wide)
     return result;
 }
 
-static instruction_operand_t get_memory_operand(uint8_t index, uint8_t mod, uint8_t **instruction_ptr)
+static instruction_operand_t get_memory_operand(uint8_t r_m, uint8_t mod, uint8_t **instruction_ptr)
 {
-    instruction_operand_t result;
+    instruction_operand_t result = { 0 };
     result.type = instruction_operand_type_memory;
     
-    switch (index)
+    assert(mod != 0x3);
+    
+    switch (r_m)
     {
         case 0b000:
         result.payload.mem.address_expression = memory_address_expression_bx_plus_si;
@@ -310,7 +353,7 @@ static instruction_operand_t get_memory_operand(uint8_t index, uint8_t mod, uint
         result.payload.mem.address_expression = memory_address_expression_di;
         break;
         case 0b110:
-        result.payload.mem.address_expression = memory_address_expression_direct_address;
+        result.payload.mem.address_expression = memory_address_expression_bp;
         break;
         case 0b111:
         result.payload.mem.address_expression = memory_address_expression_bx;
@@ -319,18 +362,24 @@ static instruction_operand_t get_memory_operand(uint8_t index, uint8_t mod, uint
         assert(false);
     }
     
+    const bool is_direct_address_case = (mod == 0b00 && r_m == 0b110);
+    if (is_direct_address_case)
+        // NOTE(achal): We use this condition later to detect if the instruction had direct address.
+        result.payload.mem.address_expression = memory_address_expression_count;
+    
     uint8_t displacement_size = 0;
     const uint8_t *displacement = *instruction_ptr;
-    if ((mod == 0b10) || (mod == 0b00 && index == 0b110) /*special case (direct address)*/)
+    if ((mod == 0b10) || is_direct_address_case)
     {
         displacement_size = 2;
         result.payload.mem.displacement = (int32_t)(*((const uint16_t *)displacement));
     }
-    else
+    else if (mod == 0x1)
     {
         displacement_size = 1;
         result.payload.mem.displacement = (int32_t)(sign_extend_8_to_16(*displacement));
     }
+    
     *instruction_ptr = *instruction_ptr + displacement_size;
     
     return result;
@@ -395,7 +444,7 @@ static uint8_t print_signed_constant(int32_t constant, char *dst)
     if (constant > 0)
         dst[result++] = '+';
     
-    const uint8_t chars_written = (uint8_t)sprintf(dst, "%d", constant);
+    const uint8_t chars_written = (uint8_t)sprintf(dst+result, "%d", constant);
     result += chars_written;
     
     return result;
@@ -476,7 +525,7 @@ static void print_memory_operand(FILE *file, memory_operand_t op)
                 "bp+di",
                 "si",
                 "di",
-                "",
+                "bp",
                 "bx"
             };
             
@@ -485,7 +534,7 @@ static void print_memory_operand(FILE *file, memory_operand_t op)
         }
         
         {
-            const bool has_direct_address = (op.address_expression == memory_address_expression_direct_address);
+            const bool has_direct_address = (op.address_expression == memory_address_expression_count);
             const bool has_disp = !has_direct_address && (op.displacement != 0);
             
             if (has_direct_address)
@@ -593,7 +642,6 @@ int main(int argc, char **argv)
         case 2:
         {
             in_file_path = argv[1];
-            out_file_path = "output.asm";
         } break;
         
         case 3:
@@ -635,16 +683,18 @@ int main(int argc, char **argv)
     uint8_t *instruction_ptr = assembled_code;
     
     // Open the output file
-    FILE *out_file = NULL;
+    FILE *out_file = stdout;
+    if (out_file_path)
     {
-        assert(out_file_path);
         out_file = fopen(out_file_path, "w");
         if (!out_file)
         {
             LOG_ERROR("Could not open a file for writing: %s", out_file_path);
-            out_file = stdout;
+            return -1;
         }
     }
+    
+    file_print(out_file, "bits 16\n\n");
     
     const char *op_mnemonic_table[] =
     {
@@ -675,6 +725,7 @@ int main(int argc, char **argv)
     };
     assert(core_array_count(op_mnemonic_table) == op_type_count);
     
+    uint32_t decoded_instruction_count = 0;
     while (instruction_ptr != assembled_code + assembled_code_size)
     {
         instruction_t decoded_instruction = { 0 };
@@ -688,7 +739,8 @@ int main(int argc, char **argv)
         for (uint8_t opcode_bit_count = MaxOPCodeBitCount; opcode_bit_count >= MinOPCodeBitCount; --opcode_bit_count)
         {
             const uint8_t opcode = bitfield_extract(opcode_byte, 8-opcode_bit_count, opcode_bit_count);
-            decoded_instruction.op_type = get_op_type(opcode, 0xFF);
+            
+            decoded_instruction.op_type = get_op_type(opcode, 0xFF, opcode_bit_count);
             
             if (decoded_instruction.op_type == op_type_count)
                 continue;
@@ -714,7 +766,7 @@ int main(int argc, char **argv)
                     
                     decoded_instruction.operands[1] = get_register_operand(reg, is_wide);
                     
-                    if (mod == 0b11)
+                    if (mod == 0x3)
                         decoded_instruction.operands[0] = get_register_operand(r_m, is_wide);
                     else
                         decoded_instruction.operands[0] = get_memory_operand(r_m, mod, &instruction_ptr);
@@ -728,7 +780,7 @@ int main(int argc, char **argv)
                 {
                     const uint8_t mod_extra_opcode_r_m_byte = *instruction_ptr++;
                     const uint8_t extra_opcode = bitfield_extract(mod_extra_opcode_r_m_byte, 3, 3);
-                    decoded_instruction.op_type = get_op_type(opcode, extra_opcode);
+                    decoded_instruction.op_type = get_op_type(opcode, extra_opcode, opcode_bit_count);
                     
                     decoded_instruction.w = bitfield_extract(opcode_byte, 0, 1);
                     const bool is_wide = (decoded_instruction.w == 0b1);
@@ -825,11 +877,12 @@ int main(int argc, char **argv)
             return -1;
         }
         
+        ++decoded_instruction_count;
+        
         // Print instruction to file
         {
             assert(out_file);
             
-            file_print(out_file, "bits 16\n\n");
             file_print(out_file, "%s ", op_mnemonic_table[decoded_instruction.op_type]);
             
             print_instruction_operand(out_file, decoded_instruction.operands[0], NULL);
@@ -851,6 +904,8 @@ int main(int argc, char **argv)
             file_print(out_file, "\n");
         }
     }
+    
+    LOG_INFO("Instructions decoded: %u", decoded_instruction_count);
     
     return 0;
 }
