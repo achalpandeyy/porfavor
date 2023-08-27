@@ -109,6 +109,7 @@ enum op_type_t
     op_type_add,
     op_type_sub,
     op_type_cmp,
+    op_type_add_sub_cmp,
     op_type_jz,     // je
     op_type_jl,     // jnge
     op_type_jle,    // jng
@@ -199,7 +200,7 @@ static __forceinline op_type_t get_op_type(uint8_t opcode, uint8_t extra_opcode,
                 case 0x16: // 0010110
                 return op_type_sub;
                 
-                case 0x1C: // 0011110
+                case 0x1E: // 0011110
                 return op_type_cmp;
             }
         } break;
@@ -217,7 +218,7 @@ static __forceinline op_type_t get_op_type(uint8_t opcode, uint8_t extra_opcode,
                 case 0x0A: // 001010
                 return op_type_sub;
                 
-                case 0x0C: // 001110
+                case 0x0E: // 001110
                 return op_type_cmp;
                 
                 case 0x20: // 100000
@@ -232,6 +233,13 @@ static __forceinline op_type_t get_op_type(uint8_t opcode, uint8_t extra_opcode,
                         
                         case 0x7: // 111
                         return op_type_cmp;
+                        
+                        // NOTE(achal): Sometimes you do not have the extra_opcode yet to figure out _exactly_
+                        // which opcode it is supposed to be so just return this special enum value. I think,
+                        // eventually I will make it just op_type_arithmetic because more arithmetic instructions
+                        // follow this extra opcode pattern.
+                        default:
+                        return op_type_add_sub_cmp;
                     }
                 }
             }
@@ -251,7 +259,8 @@ static __forceinline op_type_t get_op_type(uint8_t opcode, uint8_t extra_opcode,
     return op_type_count;
 }
 
-typedef struct
+typedef struct instruction_t instruction_t;
+struct instruction_t
 {
     op_type_t op_type;
     uint8_t w;
@@ -260,7 +269,7 @@ typedef struct
     // the disassembly instruction, this is usually the destination operand.
     // For instructions which have only one operand, operand[0] will be used.
     instruction_operand_t operands[2];
-} instruction_t;
+};
 
 static instruction_operand_t get_register_operand(uint8_t index, bool is_wide)
 {
@@ -439,7 +448,7 @@ assert(retval >= 0);\
 static uint8_t print_signed_constant(int32_t constant, char *dst)
 {
     uint8_t result = 0;
-    if (constant > 0)
+    if (constant >= 0)
         dst[result++] = '+';
     
     const uint8_t chars_written = (uint8_t)sprintf(dst+result, "%d", constant);
@@ -629,6 +638,19 @@ static void print_instruction_operand(FILE *file, instruction_operand_t op, cons
 
 int main(int argc, char **argv)
 {
+    {
+        FILE *first_file = fopen("first", "rb");
+        FILE *second_file = fopen("second", "rb");
+        
+        char first[3];
+        char second[3];
+        
+        fread(first, 1, sizeof(first), first_file);
+        fread(second, 1, sizeof(second), second_file);
+        
+        fclose(second_file);
+        fclose(first_file);
+    }
     const char *in_file_path = NULL;
     const char *out_file_path = NULL;
     switch (argc)
@@ -696,35 +718,6 @@ int main(int argc, char **argv)
     
     file_print(out_file, "bits 16\n\n");
     
-    const char *op_mnemonic_table[] =
-    {
-        "mov",
-        "add",
-        "sub",
-        "cmp",
-        "jz",
-        "jl",
-        "jle",
-        "jb",
-        "jbe",
-        "jp",
-        "jo",
-        "js",
-        "jnz",
-        "jnl",
-        "jnle",
-        "jnb",
-        "jnbe",
-        "jnp",
-        "jno",
-        "jns",
-        "loop",
-        "loopz",
-        "loopnz",
-        "jcxz"
-    };
-    assert(core_array_count(op_mnemonic_table) == op_type_count);
-    
     uint32_t decoded_instruction_count = 0;
     while (instruction_ptr != assembled_code + assembled_code_size)
     {
@@ -741,7 +734,6 @@ int main(int argc, char **argv)
             const uint8_t opcode = bitfield_extract(opcode_byte, 8-opcode_bit_count, opcode_bit_count);
             
             decoded_instruction.op_type = get_op_type(opcode, 0xFF, opcode_bit_count);
-            
             if (decoded_instruction.op_type == op_type_count)
                 continue;
             
@@ -762,7 +754,7 @@ int main(int argc, char **argv)
                     const uint8_t reg = bitfield_extract(mod_reg_r_m_byte, 3, 3);
                     const uint8_t r_m = bitfield_extract(mod_reg_r_m_byte, 0, 3);
                     
-                    const bool is_wide = (decoded_instruction.w == 0b1);
+                    const bool is_wide = (decoded_instruction.w == 0x1);
                     
                     decoded_instruction.operands[1] = get_register_operand(reg, is_wide);
                     
@@ -771,7 +763,7 @@ int main(int argc, char **argv)
                     else
                         decoded_instruction.operands[0] = get_memory_operand(r_m, mod, &instruction_ptr);
                     
-                    if (d == 0b1)
+                    if (d == 0x1)
                         core_swap(decoded_instruction.operands[0], decoded_instruction.operands[1], instruction_operand_t);
                 } break;
                 
@@ -781,6 +773,12 @@ int main(int argc, char **argv)
                     const uint8_t mod_extra_opcode_r_m_byte = *instruction_ptr++;
                     const uint8_t extra_opcode = bitfield_extract(mod_extra_opcode_r_m_byte, 3, 3);
                     decoded_instruction.op_type = get_op_type(opcode, extra_opcode, opcode_bit_count);
+                    if (decoded_instruction.op_type == op_type_add_sub_cmp)
+                    {
+                        op_code_found = false;
+                        assert(false);
+                        continue;
+                    }
                     
                     decoded_instruction.w = bitfield_extract(opcode_byte, 0, 1);
                     const bool is_wide = (decoded_instruction.w == 0b1);
@@ -861,6 +859,7 @@ int main(int argc, char **argv)
                 case 0b11100011: // jcxz
                 {
                     decoded_instruction.operands[0] = get_relative_jump_immediate_operand(&instruction_ptr);
+                    decoded_instruction.operands[1].type = instruction_operand_type_count;
                 } break;
                 
                 default:
@@ -883,23 +882,56 @@ int main(int argc, char **argv)
         {
             assert(out_file);
             
+            const char *op_mnemonic_table[] =
+            {
+                "mov",
+                "add",
+                "sub",
+                "cmp",
+                "", // add_sub_cmp
+                "jz",
+                "jl",
+                "jle",
+                "jb",
+                "jbe",
+                "jp",
+                "jo",
+                "js",
+                "jnz",
+                "jnl",
+                "jnle",
+                "jnb",
+                "jnbe",
+                "jnp",
+                "jno",
+                "jns",
+                "loop",
+                "loopz",
+                "loopnz",
+                "jcxz"
+            };
+            assert(core_array_count(op_mnemonic_table) == op_type_count);
+            
+            assert(decoded_instruction.op_type != op_type_add_sub_cmp);
             file_print(out_file, "%s ", op_mnemonic_table[decoded_instruction.op_type]);
             
             print_instruction_operand(out_file, decoded_instruction.operands[0], NULL);
             
-            file_print(out_file, ", ");
-            
-            const bool should_print_size_expression =
-            ((decoded_instruction.operands[0].type == instruction_operand_type_memory) && (decoded_instruction.operands[1].type == instruction_operand_type_immediate)) ||
-            ((decoded_instruction.operands[0].type == instruction_operand_type_immediate) && (decoded_instruction.operands[1].type == instruction_operand_type_memory));
-            
-            const char *size_expression = NULL;
-            if (should_print_size_expression)
-                size_expression = (decoded_instruction.w == 0b0) ? "byte" : "word";
-            
-            // TODO(achal): Sometimes we only have a single operand. So I think I should detect when that
-            // is the case and not call the following function accordingly?
-            print_instruction_operand(out_file, decoded_instruction.operands[1], size_expression);
+            if (decoded_instruction.operands[1].type != instruction_operand_type_count)
+            {
+                file_print(out_file, ", ");
+                
+                const bool should_print_size_expression =
+                ((decoded_instruction.operands[0].type == instruction_operand_type_memory) && (decoded_instruction.operands[1].type == instruction_operand_type_immediate)) ||
+                ((decoded_instruction.operands[0].type == instruction_operand_type_immediate) && (decoded_instruction.operands[1].type == instruction_operand_type_memory));
+                
+                const char *size_expression = NULL;
+                if (should_print_size_expression)
+                    size_expression = (decoded_instruction.w == 0b0) ? "byte" : "word";
+                
+                
+                print_instruction_operand(out_file, decoded_instruction.operands[1], size_expression);
+            }
             
             file_print(out_file, "\n");
         }
