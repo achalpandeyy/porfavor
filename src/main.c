@@ -638,19 +638,6 @@ static void print_instruction_operand(FILE *file, instruction_operand_t op, cons
 
 int main(int argc, char **argv)
 {
-    {
-        FILE *first_file = fopen("first", "rb");
-        FILE *second_file = fopen("second", "rb");
-        
-        char first[3];
-        char second[3];
-        
-        fread(first, 1, sizeof(first), first_file);
-        fread(second, 1, sizeof(second), second_file);
-        
-        fclose(second_file);
-        fclose(first_file);
-    }
     const char *in_file_path = NULL;
     const char *out_file_path = NULL;
     switch (argc)
