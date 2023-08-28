@@ -935,16 +935,38 @@ int main(int argc, char **argv)
                 print_instruction(out_file, &decoded_instruction);
                 
                 assert(decoded_instruction.operands[0].type == instruction_operand_type_register);
-                const uint32_t reg_idx = (uint32_t)decoded_instruction.operands[0].payload.reg.name;
+                const uint32_t dst_reg_idx = (uint32_t)decoded_instruction.operands[0].payload.reg.name;
                 
-                const uint16_t old_value = registers[reg_idx];
+                const uint16_t old_value = registers[dst_reg_idx];
                 
                 assert(decoded_instruction.op_type == op_type_mov);
-                assert(decoded_instruction.operands[1].type == instruction_operand_type_immediate);
-                registers[reg_idx] = (uint16_t)decoded_instruction.operands[1].payload.imm.value;
+                
+                switch (decoded_instruction.operands[1].type)
+                {
+                    case instruction_operand_type_register:
+                    {
+                        const uint32_t src_reg_idx = (uint32_t)decoded_instruction.operands[1].payload.reg.name;
+                        registers[dst_reg_idx] = registers[src_reg_idx];
+                    } break;
+                    
+                    case instruction_operand_type_memory:
+                    {
+                        assert(false);
+                    } break;
+                    
+                    case instruction_operand_type_immediate:
+                    {
+                        registers[dst_reg_idx] = (uint16_t)decoded_instruction.operands[1].payload.imm.value;
+                    } break;
+                    
+                    case instruction_operand_type_relative_jump_immediate:
+                    {
+                        assert(false);
+                    } break;
+                }
                 
                 const char *reg_name = get_register_name(&decoded_instruction.operands[0].payload.reg);
-                file_print(out_file, " ; %s:0x%X->0x%X", reg_name, old_value, registers[reg_idx]);
+                file_print(out_file, " ; %s:0x%X->0x%X", reg_name, old_value, registers[dst_reg_idx]);
             }
             else
             {
@@ -955,18 +977,21 @@ int main(int argc, char **argv)
         }
     }
     
-    file_print(out_file, "\nFinal registers:\n");
-    for (uint32_t i = 0; i < register_name_count; ++i)
+    if (is_execution_mode)
     {
-        const char *name = NULL;
+        file_print(out_file, "\nFinal registers:\n");
+        for (uint32_t i = 0; i < register_name_count; ++i)
         {
-            register_operand_t reg = { 0 };
-            reg.name = i;
-            reg.count = 2;
-            name = get_register_name(&reg);
+            const char *name = NULL;
+            {
+                register_operand_t reg = { 0 };
+                reg.name = i;
+                reg.count = 2;
+                name = get_register_name(&reg);
+            }
+            
+            file_print(out_file, "\t%s: 0x%04X (%u)\n", name, registers[i], registers[i]);
         }
-        
-        file_print(out_file, "\t%s: 0x%04X (%u)\n", name, registers[i], registers[i]);
     }
     
     if (out_file != stdout)

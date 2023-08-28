@@ -13,6 +13,7 @@ assembled_listings=(
     "listing_0041_add_sub_cmp_jnz"
     "listing_0042_completionist_decode"
     "listing_0043_immediate_movs"
+	"listing_0044_register_movs"
 )
 
 RED='\033[0;31m'
