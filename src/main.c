@@ -2,6 +2,7 @@
 
 #define LOG_INFO(fmt, ...) core_logger_log(core_logger_level_info, fmt, ##__VA_ARGS__)
 #define LOG_DEBUG(fmt, ...) core_logger_log(core_logger_level_debug, fmt, ##__VA_ARGS__)
+#define LOG_WARNING(fmt, ...) core_logger_log(core_logger_level_warning, fmt, ##__VA_ARGS__)
 #define LOG_FATAL(fmt, ...) core_logger_log(core_logger_level_fatal, fmt, ##__VA_ARGS__)
 #define LOG_ERROR(fmt, ...) core_logger_log(core_logger_level_error, fmt, ##__VA_ARGS__)
 
@@ -25,9 +26,9 @@ typedef enum register_name_t register_name_t;
 enum register_name_t
 {
     register_name_a = 0,
+    register_name_b,
     register_name_c,
     register_name_d,
-    register_name_b,
     register_name_sp,
     register_name_bp,
     register_name_si,
@@ -279,49 +280,49 @@ static instruction_operand_t get_register_operand(uint8_t index, bool is_wide)
     
     switch (index)
     {
-        case 0b000:
+        case 0x0:
         {
             result.payload.reg.name     = register_name_a;
             result.payload.reg.offset   = 0;
         } break;
         
-        case 0b001:
+        case 0x1:
         {
             result.payload.reg.name     = register_name_c;
             result.payload.reg.offset   = 0;
         } break;
         
-        case 0b010:
+        case 0x2:
         {
             result.payload.reg.name     = register_name_d;
             result.payload.reg.offset   = 0;
         } break;
         
-        case 0b011:
+        case 0x3:
         {
             result.payload.reg.name     = register_name_b;
             result.payload.reg.offset   = 0;
         } break;
         
-        case 0b100:
+        case 0x4:
         {
             result.payload.reg.name     = is_wide ? register_name_sp : register_name_a;
             result.payload.reg.offset   = is_wide ? 0 : 1;
         } break;
         
-        case 0b101:
+        case 0x5:
         {
             result.payload.reg.name     = is_wide ? register_name_bp : register_name_c;
             result.payload.reg.offset   = is_wide ? 0 : 1;
         } break;
         
-        case 0b110:
+        case 0x6:
         {
             result.payload.reg.name     = is_wide ? register_name_si : register_name_d;
             result.payload.reg.offset   = is_wide ? 0 : 1;
         } break;
         
-        case 0b111:
+        case 0x7:
         {
             result.payload.reg.name     = is_wide ? register_name_di : register_name_b;
             result.payload.reg.offset   = is_wide ? 0 : 1;
@@ -343,28 +344,28 @@ static instruction_operand_t get_memory_operand(uint8_t r_m, uint8_t mod, uint8_
     
     switch (r_m)
     {
-        case 0b000:
+        case 0x0:
         result.payload.mem.address_expression = memory_address_expression_bx_plus_si;
         break;
-        case 0b001:
+        case 0x1:
         result.payload.mem.address_expression = memory_address_expression_bx_plus_di;
         break;
-        case 0b010:
+        case 0x2:
         result.payload.mem.address_expression = memory_address_expression_bp_plus_si;
         break;
-        case 0b011: 
+        case 0x3: 
         result.payload.mem.address_expression = memory_address_expression_bp_plus_di;
         break;
-        case 0b100:
+        case 0x4:
         result.payload.mem.address_expression = memory_address_expression_si;
         break;
-        case 0b101:               
+        case 0x5:               
         result.payload.mem.address_expression = memory_address_expression_di;
         break;
-        case 0b110:
+        case 0x6:
         result.payload.mem.address_expression = memory_address_expression_bp;
         break;
-        case 0b111:
+        case 0x7:
         result.payload.mem.address_expression = memory_address_expression_bx;
         break;
         default:
@@ -378,7 +379,7 @@ static instruction_operand_t get_memory_operand(uint8_t r_m, uint8_t mod, uint8_
     
     uint8_t displacement_size = 0;
     const uint8_t *displacement = *instruction_ptr;
-    if ((mod == 0b10) || is_direct_address_case)
+    if ((mod == 0x2) || is_direct_address_case)
     {
         displacement_size = 2;
         result.payload.mem.displacement = (int32_t)(*((const uint16_t *)displacement));
@@ -451,68 +452,33 @@ static uint8_t print_signed_constant(int32_t constant, char *dst)
     if (constant >= 0)
         dst[result++] = '+';
     
+    // TODO(achal): Could I have just used "%+d"?
     const uint8_t chars_written = (uint8_t)sprintf(dst+result, "%d", constant);
     result += chars_written;
     
     return result;
 }
 
+static __forceinline const char * get_register_name(const register_operand_t *op)
+{
+    const char *names[][3] =
+    {
+        { "al", "ah", "ax" },
+        { "bl", "bh", "bx" },
+        { "cl", "ch", "cx" },
+        { "dl", "dh", "dx" },
+        { "sp", "sp", "sp" },
+        { "bp", "bp", "bp" },
+        { "si", "si", "si" },
+        { "di", "di", "di" },
+    };
+    
+    return names[op->name][(op->offset == 1) ? 1 : (op->count == 2 ? 2 : 0)];
+}
+
 static void print_register_operand(FILE *file, register_operand_t op)
 {
-    switch (op.name)
-    {
-        case register_name_sp:
-        file_print(file, "sp");
-        return;
-        
-        case register_name_bp:
-        file_print(file, "bp");
-        return;
-        
-        case register_name_si:
-        file_print(file, "si");
-        return;
-        
-        case register_name_di:
-        file_print(file, "di");
-        return;
-        
-        default:
-        break;
-    }
-    
-    uint8_t len = 0;
-    char name[8];
-    switch (op.name)
-    {
-        case register_name_a:
-        name[len++] = 'a';
-        break;
-        
-        case register_name_b:
-        name[len++] = 'b';
-        break;
-        
-        case register_name_c:
-        name[len++] = 'c';
-        break;
-        
-        case register_name_d:
-        name[len++] = 'd';
-        break;
-        
-        default:
-        assert(false);
-    }
-    
-    if (op.offset == 1)
-        name[len++] = 'h';
-    else
-        name[len++] = (op.count == 2) ? 'x' : 'l';
-    
-    assert(len == 2);
-    name[len] = '\0';
-    
+    const char *name = get_register_name(&op);
     file_print(file, "%s", name);
 }
 
@@ -636,39 +602,106 @@ static void print_instruction_operand(FILE *file, instruction_operand_t op, cons
     }
 }
 
+static void print_instruction(FILE *file, const instruction_t *instruction)
+{
+    const char *op_mnemonic_table[] =
+    {
+        "mov",
+        "add",
+        "sub",
+        "cmp",
+        "", // add_sub_cmp
+        "jz",
+        "jl",
+        "jle",
+        "jb",
+        "jbe",
+        "jp",
+        "jo",
+        "js",
+        "jnz",
+        "jnl",
+        "jnle",
+        "jnb",
+        "jnbe",
+        "jnp",
+        "jno",
+        "jns",
+        "loop",
+        "loopz",
+        "loopnz",
+        "jcxz"
+    };
+    assert(core_array_count(op_mnemonic_table) == op_type_count);
+    
+    assert(instruction->op_type != op_type_add_sub_cmp);
+    
+    const bool should_print_size_expression =
+    ((instruction->operands[0].type == instruction_operand_type_memory) && (instruction->operands[1].type == instruction_operand_type_immediate)) ||
+    ((instruction->operands[0].type == instruction_operand_type_immediate) && (instruction->operands[1].type == instruction_operand_type_memory));
+    
+    const char byte_str[] = "byte";
+    const char word_str[] = "word";
+    const char *size_expression = NULL;
+    if (should_print_size_expression)
+        size_expression = (instruction->w == 0x0) ? byte_str : word_str;
+    
+    file_print(file, "%s ", op_mnemonic_table[instruction->op_type]);
+    print_instruction_operand(file, instruction->operands[0], NULL);
+    if (instruction->operands[1].type != instruction_operand_type_count)
+    {
+        file_print(file, ", ");
+        print_instruction_operand(file, instruction->operands[1], size_expression);
+    }
+}
+
 int main(int argc, char **argv)
 {
+    assert(argc >= 1);
+    if (argc == 1)
+    {
+        LOG_FATAL("Usage: porfavor <path_to_asm_file>");
+        return -1;
+    }
+    
+    bool is_execution_mode = false;
     const char *in_file_path = NULL;
     const char *out_file_path = NULL;
-    switch (argc)
+    
+    // NOTE(achal): We assume that the first path will always be to the input file.
+    for (int i = 1; i < argc; ++i)
     {
-        case 1:
+        const char exec_flag_str[] = "-exec";
+        if (strcmp(argv[i], exec_flag_str) == 0)
         {
-            LOG_FATAL("Usage: porfavor <path_to_asm_file>");
-            return -1;
+            is_execution_mode = true;
+            continue;
         }
         
-        case 2:
+        if (!in_file_path)
         {
-            in_file_path = argv[1];
-        } break;
-        
-        case 3:
-        {
-            in_file_path = argv[1];
-            out_file_path = argv[2];
-        } break;
-        
-        default:
-        {
-            assert(false);
-            break;
+            in_file_path = argv[i];
+            continue;
         }
+        
+        if (!out_file_path)
+        {
+            out_file_path = argv[i];
+            continue;
+        }
+        
+        LOG_WARNING("Unknown flag recieved: %s. Ignoring..", argv[i]);
     }
     
     uint32_t assembled_code_size = 0;
     uint8_t *assembled_code = NULL;
     {
+        if (!in_file_path)
+        {
+            LOG_FATAL("No input file path specified");
+            return -1;
+        }
+        
         FILE *file = fopen(in_file_path, "rb");
         if (!file)
         {
@@ -703,7 +736,27 @@ int main(int argc, char **argv)
         }
     }
     
-    file_print(out_file, "bits 16\n\n");
+    if (is_execution_mode)
+    {
+        const char *file_name = in_file_path;
+        {
+            const char *listing_name = strchr(in_file_path, '/');
+            if (!listing_name)
+                listing_name = strchr(in_file_path, '\\');
+            
+            if (listing_name && (strlen(listing_name) > 1))
+                file_name = listing_name+1; // eat up the slash
+        }
+        
+        file_print(out_file, "--- test\\%s execution ---\n", file_name);
+    }
+    else
+    {
+        file_print(out_file, "bits 16\n\n");
+    }
+    
+    uint16_t registers[register_name_count];
+    memset(registers, 0, sizeof(registers));
     
     uint32_t decoded_instruction_count = 0;
     while (instruction_ptr != assembled_code + assembled_code_size)
@@ -865,64 +918,59 @@ int main(int argc, char **argv)
         
         ++decoded_instruction_count;
         
-        // Print instruction to file
+        // Print instructions and/or trace
         {
             assert(out_file);
             
-            const char *op_mnemonic_table[] =
+            if (is_execution_mode)
             {
-                "mov",
-                "add",
-                "sub",
-                "cmp",
-                "", // add_sub_cmp
-                "jz",
-                "jl",
-                "jle",
-                "jb",
-                "jbe",
-                "jp",
-                "jo",
-                "js",
-                "jnz",
-                "jnl",
-                "jnle",
-                "jnb",
-                "jnbe",
-                "jnp",
-                "jno",
-                "jns",
-                "loop",
-                "loopz",
-                "loopnz",
-                "jcxz"
-            };
-            assert(core_array_count(op_mnemonic_table) == op_type_count);
-            
-            assert(decoded_instruction.op_type != op_type_add_sub_cmp);
-            file_print(out_file, "%s ", op_mnemonic_table[decoded_instruction.op_type]);
-            
-            print_instruction_operand(out_file, decoded_instruction.operands[0], NULL);
-            
-            if (decoded_instruction.operands[1].type != instruction_operand_type_count)
+                if (out_file_path)
+                {
+                    const char *extension = strrchr(out_file_path, '.');
+                    
+                    const char txt_extension_str[] = ".txt";
+                    if (!extension || (strcmp(extension, txt_extension_str) != 0))
+                        LOG_WARNING("Execution mode is enabled, output will be a text file but .txt extension not detected in the output path: %s", out_file_path);
+                }
+                print_instruction(out_file, &decoded_instruction);
+                
+                assert(decoded_instruction.operands[0].type == instruction_operand_type_register);
+                const uint32_t reg_idx = (uint32_t)decoded_instruction.operands[0].payload.reg.name;
+                
+                const uint16_t old_value = registers[reg_idx];
+                
+                assert(decoded_instruction.op_type == op_type_mov);
+                assert(decoded_instruction.operands[1].type == instruction_operand_type_immediate);
+                registers[reg_idx] = (uint16_t)decoded_instruction.operands[1].payload.imm.value;
+                
+                const char *reg_name = get_register_name(&decoded_instruction.operands[0].payload.reg);
+                file_print(out_file, " ; %s:0x%X->0x%X", reg_name, old_value, registers[reg_idx]);
+            }
+            else
             {
-                file_print(out_file, ", ");
-                
-                const bool should_print_size_expression =
-                ((decoded_instruction.operands[0].type == instruction_operand_type_memory) && (decoded_instruction.operands[1].type == instruction_operand_type_immediate)) ||
-                ((decoded_instruction.operands[0].type == instruction_operand_type_immediate) && (decoded_instruction.operands[1].type == instruction_operand_type_memory));
-                
-                const char *size_expression = NULL;
-                if (should_print_size_expression)
-                    size_expression = (decoded_instruction.w == 0b0) ? "byte" : "word";
-                
-                
-                print_instruction_operand(out_file, decoded_instruction.operands[1], size_expression);
+                print_instruction(out_file, &decoded_instruction);
             }
             
             file_print(out_file, "\n");
         }
     }
+    
+    file_print(out_file, "\nFinal registers:\n");
+    for (uint32_t i = 0; i < register_name_count; ++i)
+    {
+        const char *name = NULL;
+        {
+            register_operand_t reg = { 0 };
+            reg.name = i;
+            reg.count = 2;
+            name = get_register_name(&reg);
+        }
+        
+        file_print(out_file, "\t%s: 0x%04X (%u)\n", name, registers[i], registers[i]);
+    }
+    
+    if (out_file != stdout)
+        fclose(out_file);
     
     LOG_INFO("Instructions decoded: %u", decoded_instruction_count);
     
