@@ -17,6 +17,9 @@ assembled_listings=(
 	"listing_0045_challenge_register_movs"
 	"listing_0046_add_sub_cmp"
 	"listing_0047_challenge_flags"
+	"listing_0048_ip_register"
+	"listing_0049_conditional_jumps"
+	"listing_0050_challenge_jumps"
 )
 
 RED='\033[0;31m'

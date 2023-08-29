@@ -42,6 +42,7 @@ struct processor_state_t
 {
     uint16_t registers[register_name_count];
     uint16_t flags;
+    uint16_t ip;
 };
 
 typedef struct register_operand_t register_operand_t;
@@ -271,7 +272,9 @@ typedef struct instruction_t instruction_t;
 struct instruction_t
 {
     op_type_t op_type;
-    uint8_t w;
+    uint16_t w;
+    uint16_t size;
+    const uint8_t *address;
     
     // NOTE: operands[0] is the the one which appears first in
     // the disassembly instruction, this is usually the destination operand.
@@ -342,87 +345,82 @@ static instruction_operand_t get_register_operand(uint8_t index, bool is_wide)
     return result;
 }
 
-static instruction_operand_t get_memory_operand(uint8_t r_m, uint8_t mod, uint8_t **instruction_ptr)
+// NOTE(achal): Returns the size of the parsed data pointed to by `data`.
+static uint16_t get_memory_operand(instruction_operand_t *mem_op, uint8_t r_m, uint8_t mod, const uint8_t *data)
 {
-    instruction_operand_t result = { 0 };
-    result.type = instruction_operand_type_memory;
+    mem_op->type = instruction_operand_type_memory;
     
     assert(mod != 0x3);
     
     switch (r_m)
     {
         case 0x0:
-        result.payload.mem.address_expression = memory_address_expression_bx_plus_si;
+        mem_op->payload.mem.address_expression = memory_address_expression_bx_plus_si;
         break;
         case 0x1:
-        result.payload.mem.address_expression = memory_address_expression_bx_plus_di;
+        mem_op->payload.mem.address_expression = memory_address_expression_bx_plus_di;
         break;
         case 0x2:
-        result.payload.mem.address_expression = memory_address_expression_bp_plus_si;
+        mem_op->payload.mem.address_expression = memory_address_expression_bp_plus_si;
         break;
         case 0x3: 
-        result.payload.mem.address_expression = memory_address_expression_bp_plus_di;
+        mem_op->payload.mem.address_expression = memory_address_expression_bp_plus_di;
         break;
         case 0x4:
-        result.payload.mem.address_expression = memory_address_expression_si;
+        mem_op->payload.mem.address_expression = memory_address_expression_si;
         break;
         case 0x5:               
-        result.payload.mem.address_expression = memory_address_expression_di;
+        mem_op->payload.mem.address_expression = memory_address_expression_di;
         break;
         case 0x6:
-        result.payload.mem.address_expression = memory_address_expression_bp;
+        mem_op->payload.mem.address_expression = memory_address_expression_bp;
         break;
         case 0x7:
-        result.payload.mem.address_expression = memory_address_expression_bx;
+        mem_op->payload.mem.address_expression = memory_address_expression_bx;
         break;
         default:
         assert(false);
     }
     
-    const bool is_direct_address_case = (mod == 0b00 && r_m == 0b110);
+    const bool is_direct_address_case = (mod == 0x0 && r_m == 0x6);
     if (is_direct_address_case)
         // NOTE(achal): We use this condition later to detect if the instruction had direct address.
-        result.payload.mem.address_expression = memory_address_expression_count;
+        mem_op->payload.mem.address_expression = memory_address_expression_count;
     
-    uint8_t displacement_size = 0;
-    const uint8_t *displacement = *instruction_ptr;
+    uint16_t displacement_size = 0;
     if ((mod == 0x2) || is_direct_address_case)
     {
         displacement_size = 2;
-        result.payload.mem.displacement = (int32_t)(*((const uint16_t *)displacement));
+        mem_op->payload.mem.displacement = (int32_t)(*((const uint16_t *)data));
     }
     else if (mod == 0x1)
     {
         displacement_size = 1;
-        result.payload.mem.displacement = (int32_t)(sign_extend_8_to_16(*displacement));
+        mem_op->payload.mem.displacement = (int32_t)(sign_extend_8_to_16(*data));
     }
     
-    *instruction_ptr = *instruction_ptr + displacement_size;
-    
-    return result;
+    return displacement_size;
 }
 
-static instruction_operand_t get_immediate_operand(bool should_sign_extend, bool is_wide, uint8_t **instruction_ptr)
+static uint16_t get_immediate_operand(instruction_operand_t *imm_op, bool should_sign_extend, bool is_wide, const uint8_t *data)
 {
-    instruction_operand_t result;
-    result.type = instruction_operand_type_immediate;
+    imm_op->type = instruction_operand_type_immediate;
     
-    const uint8_t *immediate_data = *instruction_ptr;
-    uint8_t immediate_size = 0;
+    uint16_t immediate_size = 0;
     if (!should_sign_extend && !is_wide)
     {
         immediate_size = 1;
-        result.payload.imm.value = (int32_t)(*immediate_data);
+        imm_op->payload.imm.value = (int32_t)(*data);
     }
     else if (!should_sign_extend && is_wide)
     {
         immediate_size = 2;
-        result.payload.imm.value = (int32_t)(*((const uint16_t *)immediate_data));
+        imm_op->payload.imm.value = (int32_t)(*((const uint16_t *)data));
     }
     else if (should_sign_extend && is_wide)
     {
         immediate_size = 1;
-        result.payload.imm.value = (int32_t)(sign_extend_8_to_16(*immediate_data));
+        imm_op->payload.imm.value = (int32_t)(sign_extend_8_to_16(*data));
     }
     else
     {
@@ -430,21 +428,17 @@ static instruction_operand_t get_immediate_operand(bool should_sign_extend, bool
         assert(false);
     }
     
-    *instruction_ptr = *instruction_ptr + immediate_size;
-    
-    return result;
+    return immediate_size;
 };
 
-static instruction_operand_t get_relative_jump_immediate_operand(uint8_t **instruction_ptr)
+static uint16_t get_relative_jump_immediate_operand(instruction_operand_t *rel_op, const uint8_t *data)
 {
-    instruction_operand_t result;
-    result.type = instruction_operand_type_relative_jump_immediate;
+    rel_op->type = instruction_operand_type_relative_jump_immediate;
     
-    const uint8_t relative_immediate = **instruction_ptr;
+    const uint8_t relative_immediate = *data;
     // NOTE(achal): NASM will add a -2 by itself to the displacement so add 2 to counter that.
-    result.payload.rel_jump_imm.value = (int32_t)(sign_extend_8_to_16(relative_immediate)) + 2;
-    *instruction_ptr = *instruction_ptr + 1;
-    return result;
+    rel_op->payload.rel_jump_imm.value = (int32_t)(sign_extend_8_to_16(relative_immediate)) + 2;
+    return 1;
 };
 
 static uint16_t get_processor_flags(const uint16_t ref_value)
@@ -760,8 +754,6 @@ int main(int argc, char **argv)
     assert(assembled_code != NULL);
     assert(assembled_code_size != 0);
     
-    uint8_t *instruction_ptr = assembled_code;
-    
     // Open the output file
     FILE *out_file = stdout;
     if (out_file_path)
@@ -794,24 +786,27 @@ int main(int argc, char **argv)
     }
     
     processor_state_t processor_state = { 0 };
-    
+    // TODO(achal): Now, since, I save the starting address of each instruction I don't think
+    // I have to keep track of this value anymore. This will get more and more unused and
+    // hard-to-make-sense-of as I implement jumps.
     uint32_t decoded_instruction_count = 0;
-    while (instruction_ptr != assembled_code + assembled_code_size)
+    while (processor_state.ip < assembled_code_size)
     {
-        instruction_t decoded_instruction = { 0 };
+        instruction_t instruction = { 0 };
+        instruction.address = assembled_code + (size_t)processor_state.ip;
         
         enum { MinOPCodeBitCount = 4 };
         enum { MaxOPCodeBitCount = 8 };
         
-        const uint8_t opcode_byte = *instruction_ptr++;
+        const uint8_t opcode_byte = instruction.address[instruction.size++];
         
         bool op_code_found = false;
         for (uint8_t opcode_bit_count = MaxOPCodeBitCount; opcode_bit_count >= MinOPCodeBitCount; --opcode_bit_count)
         {
             const uint8_t opcode = bitfield_extract(opcode_byte, 8-opcode_bit_count, opcode_bit_count);
             
-            decoded_instruction.op_type = get_op_type(opcode, 0xFF, opcode_bit_count);
-            if (decoded_instruction.op_type == op_type_count)
+            instruction.op_type = get_op_type(opcode, 0xFF, opcode_bit_count);
+            if (instruction.op_type == op_type_count)
                 continue;
             
             op_code_found = true;
@@ -823,95 +818,95 @@ int main(int argc, char **argv)
                 case 0b001010:  // sub, Register/memory to/from register
                 case 0b001110:  // cmp, Register/memory to/from register
                 {
-                    decoded_instruction.w           = bitfield_extract(opcode_byte, 0, 1);
-                    const uint8_t d                 = bitfield_extract(opcode_byte, 1, 1);
+                    instruction.w = bitfield_extract(opcode_byte, 0, 1);
+                    const uint8_t d = bitfield_extract(opcode_byte, 1, 1);
                     
-                    const uint8_t mod_reg_r_m_byte = *instruction_ptr++;
+                    const uint8_t mod_reg_r_m_byte = instruction.address[instruction.size++];
                     const uint8_t mod = bitfield_extract(mod_reg_r_m_byte, 6, 2);
                     const uint8_t reg = bitfield_extract(mod_reg_r_m_byte, 3, 3);
                     const uint8_t r_m = bitfield_extract(mod_reg_r_m_byte, 0, 3);
                     
-                    const bool is_wide = (decoded_instruction.w == 0x1);
+                    const bool is_wide = (instruction.w == 0x1);
                     
-                    decoded_instruction.operands[1] = get_register_operand(reg, is_wide);
+                    instruction.operands[1] = get_register_operand(reg, is_wide);
                     
                     if (mod == 0x3)
-                        decoded_instruction.operands[0] = get_register_operand(r_m, is_wide);
+                        instruction.operands[0] = get_register_operand(r_m, is_wide);
                     else
-                        decoded_instruction.operands[0] = get_memory_operand(r_m, mod, &instruction_ptr);
+                        instruction.size += get_memory_operand(&instruction.operands[0], r_m, mod, instruction.address + instruction.size);
                     
                     if (d == 0x1)
-                        core_swap(decoded_instruction.operands[0], decoded_instruction.operands[1], instruction_operand_t);
+                        core_swap(instruction.operands[0], instruction.operands[1], instruction_operand_t);
                 } break;
                 
                 case 0b1100011: // mov, Immediate to register/memory
                 case 0b100000:  // add or sub or cmp, Immediate to register/memory
                 {
-                    const uint8_t mod_extra_opcode_r_m_byte = *instruction_ptr++;
+                    const uint8_t mod_extra_opcode_r_m_byte = instruction.address[instruction.size++];
                     const uint8_t extra_opcode = bitfield_extract(mod_extra_opcode_r_m_byte, 3, 3);
-                    decoded_instruction.op_type = get_op_type(opcode, extra_opcode, opcode_bit_count);
-                    if (decoded_instruction.op_type == op_type_add_sub_cmp)
+                    instruction.op_type = get_op_type(opcode, extra_opcode, opcode_bit_count);
+                    if (instruction.op_type == op_type_add_sub_cmp)
                     {
                         op_code_found = false;
                         assert(false);
                         continue;
                     }
                     
-                    decoded_instruction.w = bitfield_extract(opcode_byte, 0, 1);
-                    const bool is_wide = (decoded_instruction.w == 0b1);
+                    instruction.w = bitfield_extract(opcode_byte, 0, 1);
+                    const bool is_wide = (instruction.w == 0x1);
                     
                     const uint8_t s = bitfield_extract(opcode_byte, 1, 1);
-                    const bool should_sign_extend = (decoded_instruction.op_type == op_type_mov) ? false : (s == 0b1);
+                    const bool should_sign_extend = (instruction.op_type == op_type_mov) ? false : (s == 0x1);
                     
                     const uint8_t mod = bitfield_extract(mod_extra_opcode_r_m_byte, 6, 2);
                     const uint8_t r_m = bitfield_extract(mod_extra_opcode_r_m_byte, 0, 3);
-                    if (mod == 0b11)
+                    if (mod == 0x3)
                     {
-                        assert(decoded_instruction.op_type != op_type_mov && "The mov instruction usually doesn't take this path. There is a separate opcode for this for mov.");
-                        decoded_instruction.operands[0] = get_register_operand(r_m, is_wide);
+                        assert(instruction.op_type != op_type_mov && "The mov instruction usually doesn't take this path. There is a separate opcode for this for mov.");
+                        instruction.operands[0] = get_register_operand(r_m, is_wide);
                     }
                     else
                     {
-                        decoded_instruction.operands[0] = get_memory_operand(r_m, mod, &instruction_ptr);
+                        instruction.size += get_memory_operand(&instruction.operands[0], r_m, mod, instruction.address + instruction.size);
                     }
                     
-                    decoded_instruction.operands[1] = get_immediate_operand(should_sign_extend, is_wide, &instruction_ptr);
+                    instruction.size += get_immediate_operand(&instruction.operands[1], should_sign_extend, is_wide, instruction.address+instruction.size);
                 } break;
                 
                 case 0b1011: // mov, Immediate to register
                 {
-                    decoded_instruction.w = bitfield_extract(opcode_byte, 3, 1);
-                    const bool is_wide = (decoded_instruction.w == 0b1);
+                    instruction.w = bitfield_extract(opcode_byte, 3, 1);
+                    const bool is_wide = (instruction.w == 0x1);
                     
-                    decoded_instruction.operands[1] = get_immediate_operand(false, is_wide, &instruction_ptr);
+                    instruction.size += get_immediate_operand(&instruction.operands[1], false, is_wide, instruction.address + instruction.size);
                     
                     const uint8_t reg = bitfield_extract(opcode_byte, 0, 3);
-                    decoded_instruction.operands[0] = get_register_operand(reg, is_wide);
+                    instruction.operands[0] = get_register_operand(reg, is_wide);
                 } break;
                 
                 case 0b1010000: // mov, Memory to accumulator
                 case 0b1010001: // mov, Accumulator to memory
                 {
                     // NOTE(achal): Assume Memory to accumulator..
-                    decoded_instruction.w = bitfield_extract(opcode_byte, 0, 1);
+                    instruction.w = bitfield_extract(opcode_byte, 0, 1);
                     
-                    decoded_instruction.operands[0] = get_register_operand(0b000, decoded_instruction.w == 0b1);
-                    decoded_instruction.operands[1] = get_memory_operand(0b110, 0b00, &instruction_ptr);
+                    instruction.operands[0] = get_register_operand(0x0, instruction.w == 0x1);
+                    instruction.size += get_memory_operand(&instruction.operands[1], 0x6, 0x0, instruction.address + instruction.size);
                     
                     // NOTE(achal): Swap if it is Accumulator to memory
                     if (opcode == 0b1010001)
-                        core_swap(decoded_instruction.operands[0], decoded_instruction.operands[1], instruction_operand_t);
+                        core_swap(instruction.operands[0], instruction.operands[1], instruction_operand_t);
                 } break;
                 
                 case 0b0000010: // add, Immediate to accumulator
                 case 0b0010110: // sub, Immediate to accumulator
                 case 0b0011110: // cmp, Immediate to accumulator
                 {
-                    decoded_instruction.w = bitfield_extract(opcode_byte, 0, 1);
-                    const bool is_wide = decoded_instruction.w == 0b1;
+                    instruction.w = bitfield_extract(opcode_byte, 0, 1);
+                    const bool is_wide = instruction.w == 0x1;
                     
-                    decoded_instruction.operands[1] = get_immediate_operand(false, is_wide, &instruction_ptr);
-                    decoded_instruction.operands[0] = get_register_operand(0b000, is_wide);
+                    instruction.size += get_immediate_operand(&instruction.operands[1], false, is_wide, instruction.address + instruction.size);
+                    instruction.operands[0] = get_register_operand(0x0, is_wide);
                 } break;
                 
                 case 0b01110100: // jz/je
@@ -935,8 +930,8 @@ int main(int argc, char **argv)
                 case 0b11100000: // loopnz/loopne
                 case 0b11100011: // jcxz
                 {
-                    decoded_instruction.operands[0] = get_relative_jump_immediate_operand(&instruction_ptr);
-                    decoded_instruction.operands[1].type = instruction_operand_type_count;
+                    instruction.size += get_relative_jump_immediate_operand(&instruction.operands[0], instruction.address + instruction.size);
+                    instruction.operands[1].type = instruction_operand_type_count;
                 } break;
                 
                 default:
@@ -954,6 +949,7 @@ int main(int argc, char **argv)
         }
         
         ++decoded_instruction_count;
+        processor_state.ip += instruction.size;
         
         // Print instructions and/or trace
         {
@@ -969,10 +965,10 @@ int main(int argc, char **argv)
                     if (!extension || (strcmp(extension, txt_extension_str) != 0))
                         LOG_WARNING("Execution mode is enabled, output will be a text file but .txt extension not detected in the output path: %s", out_file_path);
                 }
-                print_instruction(out_file, &decoded_instruction);
+                print_instruction(out_file, &instruction);
                 
-                const instruction_operand_t *src_op = &decoded_instruction.operands[1];
-                const instruction_operand_t *dst_op = &decoded_instruction.operands[0];
+                const instruction_operand_t *src_op = &instruction.operands[1];
+                const instruction_operand_t *dst_op = &instruction.operands[0];
                 
                 uint32_t src_value = 0xFFFFFFFF;
                 switch (src_op->type)
@@ -1006,7 +1002,7 @@ int main(int argc, char **argv)
                 const uint16_t old_reg_value = processor_state.registers[dst_reg_idx];
                 const uint16_t old_flags = processor_state.flags;
                 
-                switch (decoded_instruction.op_type)
+                switch (instruction.op_type)
                 {
                     case op_type_mov:
                     {
@@ -1054,7 +1050,7 @@ int main(int argc, char **argv)
             }
             else
             {
-                print_instruction(out_file, &decoded_instruction);
+                print_instruction(out_file, &instruction);
             }
             
             file_print(out_file, "\n");
