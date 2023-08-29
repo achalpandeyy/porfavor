@@ -14,6 +14,9 @@ assembled_listings=(
     "listing_0042_completionist_decode"
     "listing_0043_immediate_movs"
 	"listing_0044_register_movs"
+	"listing_0045_challenge_register_movs"
+	"listing_0046_add_sub_cmp"
+	"listing_0047_challenge_flags"
 )
 
 RED='\033[0;31m'

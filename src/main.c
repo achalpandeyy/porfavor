@@ -37,6 +37,13 @@ enum register_name_t
     register_name_count
 };
 
+typedef struct processor_state_t processor_state_t;
+struct processor_state_t
+{
+    uint16_t registers[register_name_count];
+    uint16_t flags;
+};
+
 typedef struct register_operand_t register_operand_t;
 struct register_operand_t
 {
@@ -419,7 +426,7 @@ static instruction_operand_t get_immediate_operand(bool should_sign_extend, bool
     }
     else
     {
-        // NOTE: This case shouldn't be possible.
+        // NOTE(achal): This case shouldn't be possible.
         assert(false);
     }
     
@@ -434,11 +441,30 @@ static instruction_operand_t get_relative_jump_immediate_operand(uint8_t **instr
     result.type = instruction_operand_type_relative_jump_immediate;
     
     const uint8_t relative_immediate = **instruction_ptr;
-    // NOTE: NASM will add a -2 by itself to the displacement so add 2 to counter that.
+    // NOTE(achal): NASM will add a -2 by itself to the displacement so add 2 to counter that.
     result.payload.rel_jump_imm.value = (int32_t)(sign_extend_8_to_16(relative_immediate)) + 2;
     *instruction_ptr = *instruction_ptr + 1;
     return result;
 };
+
+static uint16_t get_processor_flags(const uint16_t ref_value)
+{
+    const uint32_t Bit_ZF = 6;
+    const uint32_t Bit_SF = 7;
+    
+    uint16_t result = 0;
+    
+    if (ref_value == 0) // ZF
+    {
+        result |= (0x1 << Bit_ZF);
+    }
+    else if ((int16_t)ref_value < 0) // SF
+    {
+        result|= (0x1 << Bit_SF);
+    }
+    
+    return result;
+}
 
 #define file_print(file, fmt, ...)\
 {\
@@ -655,6 +681,18 @@ static void print_instruction(FILE *file, const instruction_t *instruction)
     }
 }
 
+static void print_processor_flags(FILE *file, uint16_t flags)
+{
+    const char *flags_name_table[] = { "CF", "", "PF", "", "AF", "", "ZF", "SF", "TF", "IF", "DF", "OF", "", "", "", "" };
+    
+    for (uint32_t i = 0; i < 16; ++i)
+    {
+        const uint16_t mask = (0x1 << i);
+        if (flags & mask)
+            file_print(file, "%s", flags_name_table[i]);
+    }
+}
+
 int main(int argc, char **argv)
 {
     assert(argc >= 1);
@@ -755,8 +793,7 @@ int main(int argc, char **argv)
         file_print(out_file, "bits 16\n\n");
     }
     
-    uint16_t registers[register_name_count];
-    memset(registers, 0, sizeof(registers));
+    processor_state_t processor_state = { 0 };
     
     uint32_t decoded_instruction_count = 0;
     while (instruction_ptr != assembled_code + assembled_code_size)
@@ -934,19 +971,16 @@ int main(int argc, char **argv)
                 }
                 print_instruction(out_file, &decoded_instruction);
                 
-                assert(decoded_instruction.operands[0].type == instruction_operand_type_register);
-                const uint32_t dst_reg_idx = (uint32_t)decoded_instruction.operands[0].payload.reg.name;
+                const instruction_operand_t *src_op = &decoded_instruction.operands[1];
+                const instruction_operand_t *dst_op = &decoded_instruction.operands[0];
                 
-                const uint16_t old_value = registers[dst_reg_idx];
-                
-                assert(decoded_instruction.op_type == op_type_mov);
-                
-                switch (decoded_instruction.operands[1].type)
+                uint32_t src_value = 0xFFFFFFFF;
+                switch (src_op->type)
                 {
                     case instruction_operand_type_register:
                     {
-                        const uint32_t src_reg_idx = (uint32_t)decoded_instruction.operands[1].payload.reg.name;
-                        registers[dst_reg_idx] = registers[src_reg_idx];
+                        const uint32_t src_reg_idx = (uint32_t)src_op->payload.reg.name;
+                        src_value = (uint32_t)processor_state.registers[src_reg_idx];
                     } break;
                     
                     case instruction_operand_type_memory:
@@ -956,7 +990,7 @@ int main(int argc, char **argv)
                     
                     case instruction_operand_type_immediate:
                     {
-                        registers[dst_reg_idx] = (uint16_t)decoded_instruction.operands[1].payload.imm.value;
+                        src_value = (uint32_t)src_op->payload.imm.value;
                     } break;
                     
                     case instruction_operand_type_relative_jump_immediate:
@@ -964,9 +998,59 @@ int main(int argc, char **argv)
                         assert(false);
                     } break;
                 }
+                assert(src_value != 0xFFFFFFFF);
                 
-                const char *reg_name = get_register_name(&decoded_instruction.operands[0].payload.reg);
-                file_print(out_file, " ; %s:0x%X->0x%X", reg_name, old_value, registers[dst_reg_idx]);
+                assert(dst_op->type == instruction_operand_type_register);
+                const uint32_t dst_reg_idx = (uint32_t)dst_op->payload.reg.name;
+                
+                const uint16_t old_reg_value = processor_state.registers[dst_reg_idx];
+                const uint16_t old_flags = processor_state.flags;
+                
+                switch (decoded_instruction.op_type)
+                {
+                    case op_type_mov:
+                    {
+                        processor_state.registers[dst_reg_idx] = (uint16_t)src_value;
+                    } break;
+                    
+                    case op_type_add:
+                    {
+                        processor_state.registers[dst_reg_idx] += (uint16_t)src_value;
+                        processor_state.flags = get_processor_flags(processor_state.registers[dst_reg_idx]);
+                    } break;
+                    
+                    case op_type_sub:
+                    {
+                        processor_state.registers[dst_reg_idx] -= (uint16_t)src_value;
+                        processor_state.flags = get_processor_flags(processor_state.registers[dst_reg_idx]);
+                    } break;
+                    
+                    case op_type_cmp:
+                    {
+                        uint16_t temp = processor_state.registers[dst_reg_idx] - (uint16_t)src_value;
+                        processor_state.flags = get_processor_flags(temp);
+                    } break;
+                    
+                    default:
+                    assert(false);
+                    break;
+                }
+                
+                file_print(out_file, " ;");
+                
+                if (old_reg_value != processor_state.registers[dst_reg_idx])
+                {
+                    const char *reg_name = get_register_name(&dst_op->payload.reg);
+                    file_print(out_file, " %s:0x%X->0x%X", reg_name, old_reg_value, processor_state.registers[dst_reg_idx]);
+                }
+                
+                if (old_flags != processor_state.flags)
+                {
+                    file_print(out_file, " flags:");
+                    print_processor_flags(out_file, old_flags);
+                    file_print(out_file, "->");
+                    print_processor_flags(out_file, processor_state.flags);
+                }
             }
             else
             {
@@ -990,8 +1074,12 @@ int main(int argc, char **argv)
                 name = get_register_name(&reg);
             }
             
-            file_print(out_file, "\t%s: 0x%04X (%u)\n", name, registers[i], registers[i]);
+            file_print(out_file, "\t%s: 0x%04X (%u)\n", name, processor_state.registers[i], processor_state.registers[i]);
         }
+        
+        file_print(out_file, "\tflags: ");
+        print_processor_flags(out_file, processor_state.flags);
+        file_print(out_file, "\n");
     }
     
     if (out_file != stdout)
