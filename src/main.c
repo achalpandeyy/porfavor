@@ -786,10 +786,12 @@ int main(int argc, char **argv)
     }
     
     processor_state_t processor_state = { 0 };
+    
     // TODO(achal): Now, since, I save the starting address of each instruction I don't think
     // I have to keep track of this value anymore. This will get more and more unused and
     // hard-to-make-sense-of as I implement jumps.
     uint32_t decoded_instruction_count = 0;
+    
     while (processor_state.ip < assembled_code_size)
     {
         instruction_t instruction = { 0 };
@@ -949,11 +951,14 @@ int main(int argc, char **argv)
         }
         
         ++decoded_instruction_count;
-        processor_state.ip += instruction.size;
         
         // Print instructions and/or trace
         {
             assert(out_file);
+            
+            const processor_state_t prev_processor_state = processor_state;
+            
+            processor_state.ip += instruction.size;
             
             if (is_execution_mode)
             {
@@ -999,9 +1004,6 @@ int main(int argc, char **argv)
                 assert(dst_op->type == instruction_operand_type_register);
                 const uint32_t dst_reg_idx = (uint32_t)dst_op->payload.reg.name;
                 
-                const uint16_t old_reg_value = processor_state.registers[dst_reg_idx];
-                const uint16_t old_flags = processor_state.flags;
-                
                 switch (instruction.op_type)
                 {
                     case op_type_mov:
@@ -1034,19 +1036,25 @@ int main(int argc, char **argv)
                 
                 file_print(out_file, " ;");
                 
-                if (old_reg_value != processor_state.registers[dst_reg_idx])
+                if (prev_processor_state.registers[dst_reg_idx] != processor_state.registers[dst_reg_idx])
                 {
                     const char *reg_name = get_register_name(&dst_op->payload.reg);
-                    file_print(out_file, " %s:0x%X->0x%X", reg_name, old_reg_value, processor_state.registers[dst_reg_idx]);
+                    file_print(out_file, " %s:0x%X->0x%X", reg_name, prev_processor_state.registers[dst_reg_idx], processor_state.registers[dst_reg_idx]);
                 }
                 
-                if (old_flags != processor_state.flags)
+                if (prev_processor_state.ip != processor_state.ip)
+                {
+                    file_print(out_file, " ip:0x%X->0x%X", prev_processor_state.ip, processor_state.ip);
+                }
+                
+                if (prev_processor_state.flags != processor_state.flags)
                 {
                     file_print(out_file, " flags:");
-                    print_processor_flags(out_file, old_flags);
+                    print_processor_flags(out_file, prev_processor_state.flags);
                     file_print(out_file, "->");
                     print_processor_flags(out_file, processor_state.flags);
                 }
+                
             }
             else
             {
@@ -1072,6 +1080,8 @@ int main(int argc, char **argv)
             
             file_print(out_file, "\t%s: 0x%04X (%u)\n", name, processor_state.registers[i], processor_state.registers[i]);
         }
+        
+        file_print(out_file, "\tip: 0x%04X (%u)\n", processor_state.ip, processor_state.ip);
         
         file_print(out_file, "\tflags: ");
         print_processor_flags(out_file, processor_state.flags);
