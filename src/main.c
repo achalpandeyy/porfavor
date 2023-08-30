@@ -436,8 +436,7 @@ static uint16_t get_relative_jump_immediate_operand(instruction_operand_t *rel_o
     rel_op->type = instruction_operand_type_relative_jump_immediate;
     
     const uint8_t relative_immediate = *data;
-    // NOTE(achal): NASM will add a -2 by itself to the displacement so add 2 to counter that.
-    rel_op->payload.rel_jump_imm.value = (int32_t)(sign_extend_8_to_16(relative_immediate)) + 2;
+    rel_op->payload.rel_jump_imm.value = (int32_t)(sign_extend_8_to_16(relative_immediate));
     return 1;
 };
 
@@ -586,7 +585,8 @@ static void print_relative_jump_immediate(FILE *file, relative_jump_immediate_op
     {
         expression[len++] = '$';
         
-        const uint8_t chars_written = print_signed_constant(op.value, expression+len);
+        // NOTE(achal): NASM will add a -2 by itself to the relative jump immediate so add 2 to counter that.
+        const uint8_t chars_written = print_signed_constant(op.value+2, expression+len);
         len += chars_written;
         
         assert(len < core_array_count(expression));
@@ -974,6 +974,11 @@ int main(int argc, char **argv)
                 
                 const instruction_operand_t *src_op = &instruction.operands[1];
                 const instruction_operand_t *dst_op = &instruction.operands[0];
+                if (src_op->type == instruction_operand_type_count)
+                {
+                    src_op = dst_op;
+                    dst_op = NULL;
+                }
                 
                 uint32_t src_value = 0xFFFFFFFF;
                 switch (src_op->type)
@@ -996,13 +1001,17 @@ int main(int argc, char **argv)
                     
                     case instruction_operand_type_relative_jump_immediate:
                     {
-                        assert(false);
+                        src_value = (uint32_t)src_op->payload.rel_jump_imm.value;
                     } break;
                 }
                 assert(src_value != 0xFFFFFFFF);
                 
-                assert(dst_op->type == instruction_operand_type_register);
-                const uint32_t dst_reg_idx = (uint32_t)dst_op->payload.reg.name;
+                uint32_t dst_reg_idx = UINT32_MAX;
+                if (dst_op)
+                {
+                    assert(dst_op->type == instruction_operand_type_register);
+                    dst_reg_idx = (uint32_t)dst_op->payload.reg.name;
+                }
                 
                 switch (instruction.op_type)
                 {
@@ -1029,6 +1038,16 @@ int main(int argc, char **argv)
                         processor_state.flags = get_processor_flags(temp);
                     } break;
                     
+                    case op_type_jnz:
+                    {
+                        const uint32_t Bit_ZF = 6;
+                        if ((processor_state.flags & (0x1 << Bit_ZF)) == 0)
+                        {
+                            assert(processor_state.ip != 0);
+                            processor_state.ip += (uint16_t)src_value;
+                        }
+                    } break;
+                    
                     default:
                     assert(false);
                     break;
@@ -1036,10 +1055,15 @@ int main(int argc, char **argv)
                 
                 file_print(out_file, " ;");
                 
-                if (prev_processor_state.registers[dst_reg_idx] != processor_state.registers[dst_reg_idx])
+                if (dst_op)
                 {
-                    const char *reg_name = get_register_name(&dst_op->payload.reg);
-                    file_print(out_file, " %s:0x%X->0x%X", reg_name, prev_processor_state.registers[dst_reg_idx], processor_state.registers[dst_reg_idx]);
+                    assert(dst_reg_idx != UINT32_MAX);
+                    
+                    if (prev_processor_state.registers[dst_reg_idx] != processor_state.registers[dst_reg_idx])
+                    {
+                        const char *reg_name = get_register_name(&dst_op->payload.reg);
+                        file_print(out_file, " %s:0x%X->0x%X", reg_name, prev_processor_state.registers[dst_reg_idx], processor_state.registers[dst_reg_idx]);
+                    }
                 }
                 
                 if (prev_processor_state.ip != processor_state.ip)
@@ -1054,7 +1078,6 @@ int main(int argc, char **argv)
                     file_print(out_file, "->");
                     print_processor_flags(out_file, processor_state.flags);
                 }
-                
             }
             else
             {
