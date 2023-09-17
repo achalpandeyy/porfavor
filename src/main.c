@@ -6,19 +6,27 @@
 #define LOG_FATAL(fmt, ...) core_logger_log(core_logger_level_fatal, fmt, ##__VA_ARGS__)
 #define LOG_ERROR(fmt, ...) core_logger_log(core_logger_level_error, fmt, ##__VA_ARGS__)
 
+typedef uint8_t u8;
+typedef uint16_t u16;
+typedef uint32_t u32;
+typedef uint64_t u64;
+
+typedef int16_t s16;
+typedef int32_t s32;
+
 #include <stdlib.h>
 #include <string.h>
 
-static uint8_t bitfield_extract(uint8_t value, uint8_t offset, uint8_t count)
+static u8 bitfield_extract(u8 value, u8 offset, u8 count)
 {
-    const uint8_t mask = (1 << count) - 1;
-    const uint8_t result = (value >> offset) & mask;
+    const u8 mask = (1 << count) - 1;
+    const u8 result = (value >> offset) & mask;
     return result;
 }
 
-static int16_t sign_extend_8_to_16(uint8_t value)
+static s16 sign_extend_8_to_16(u8 value)
 {
-    const int16_t result = (value & 0x80) ? (0xFF00 | value) : value;
+    const s16 result = (value & 0x80) ? (0xFF00 | value) : value;
     return result;
 }
 
@@ -40,17 +48,20 @@ enum register_name_t
 typedef struct processor_state_t processor_state_t;
 struct processor_state_t
 {
-    uint16_t registers[register_name_count];
-    uint16_t flags;
-    uint16_t ip;
+    u16 ip;
+    
+    // NOTE(achal): These members are only required in simulation mode
+    u16 flags;
+    u16 registers[register_name_count];
+    u8 *memory; // 1 MB
 };
 
 typedef struct register_operand_t register_operand_t;
 struct register_operand_t
 {
     register_name_t name;
-    uint8_t offset;
-    uint8_t count;
+    u8 offset;
+    u8 count;
 };
 
 typedef enum memory_address_expression_t memory_address_expression_t;
@@ -72,19 +83,19 @@ typedef struct memory_operand_t memory_operand_t;
 struct memory_operand_t
 {
     memory_address_expression_t address_expression;
-    int32_t displacement; // just 16 bits should do but the compiler will pad it up anyways, so why not just claim the memory
+    s32 displacement; // just 16 bits should do but the compiler will pad it up anyways, so why not just claim the memory
 };
 
 typedef struct immediate_operand_t immediate_operand_t;
 struct immediate_operand_t
 {
-    int32_t value;
+    s32 value;
 };
 
 typedef struct relative_jump_immediate_operand_t relative_jump_immediate_operand_t;
 struct relative_jump_immediate_operand_t
 {
-    int32_t value;
+    s32 value;
 };
 
 typedef enum instruction_operand_type_t instruction_operand_type_t;
@@ -143,7 +154,7 @@ enum op_type_t
     op_type_count
 };
 
-static __forceinline op_type_t get_op_type(uint8_t opcode, uint8_t extra_opcode, uint32_t bits_to_match)
+static __forceinline op_type_t get_op_type(u8 opcode, u8 extra_opcode, uint32_t bits_to_match)
 {
     switch (bits_to_match)
     {
@@ -274,7 +285,7 @@ struct instruction_t
     op_type_t op_type;
     uint16_t w;
     uint16_t size;
-    const uint8_t *address;
+    const u8 *address;
     
     // NOTE: operands[0] is the the one which appears first in
     // the disassembly instruction, this is usually the destination operand.
@@ -282,7 +293,7 @@ struct instruction_t
     instruction_operand_t operands[2];
 };
 
-static instruction_operand_t get_register_operand(uint8_t index, bool is_wide)
+static instruction_operand_t get_register_operand(u8 index, bool is_wide)
 {
     instruction_operand_t result = { 0 };
     result.type = instruction_operand_type_register;
@@ -346,7 +357,7 @@ static instruction_operand_t get_register_operand(uint8_t index, bool is_wide)
 }
 
 // NOTE(achal): Returns the size of the parsed data pointed to by `data`.
-static uint16_t get_memory_operand(instruction_operand_t *mem_op, uint8_t r_m, uint8_t mod, const uint8_t *data)
+static uint16_t get_memory_operand(instruction_operand_t *mem_op, u8 r_m, u8 mod, const u8 *data)
 {
     mem_op->type = instruction_operand_type_memory;
     
@@ -387,7 +398,7 @@ static uint16_t get_memory_operand(instruction_operand_t *mem_op, uint8_t r_m, u
         // NOTE(achal): We use this condition later to detect if the instruction had direct address.
         mem_op->payload.mem.address_expression = memory_address_expression_count;
     
-    uint16_t displacement_size = 0;
+    u16 displacement_size = 0;
     if ((mod == 0x2) || is_direct_address_case)
     {
         displacement_size = 2;
@@ -402,7 +413,7 @@ static uint16_t get_memory_operand(instruction_operand_t *mem_op, uint8_t r_m, u
     return displacement_size;
 }
 
-static uint16_t get_immediate_operand(instruction_operand_t *imm_op, bool should_sign_extend, bool is_wide, const uint8_t *data)
+static uint16_t get_immediate_operand(instruction_operand_t *imm_op, bool should_sign_extend, bool is_wide, const u8 *data)
 {
     imm_op->type = instruction_operand_type_immediate;
     
@@ -431,27 +442,93 @@ static uint16_t get_immediate_operand(instruction_operand_t *imm_op, bool should
     return immediate_size;
 };
 
-static uint16_t get_relative_jump_immediate_operand(instruction_operand_t *rel_op, const uint8_t *data)
+static uint16_t get_relative_jump_immediate_operand(instruction_operand_t *rel_op, const u8 *data)
 {
     rel_op->type = instruction_operand_type_relative_jump_immediate;
     
-    const uint8_t relative_immediate = *data;
+    const u8 relative_immediate = *data;
     rel_op->payload.rel_jump_imm.value = (int32_t)(sign_extend_8_to_16(relative_immediate));
     return 1;
 };
 
-static uint16_t get_processor_flags(const uint16_t ref_value)
+static u32 get_effective_address(const memory_operand_t *mem_op, const processor_state_t *processor_state)
+{
+    u32 result = 0;
+    switch (mem_op->address_expression)
+    {
+        case memory_address_expression_bx_plus_si:
+        {
+            const u16 bx = processor_state->registers[register_name_b];
+            const u16 si = processor_state->registers[register_name_si];
+            result += bx+si;
+        } break;
+        
+        case memory_address_expression_bx_plus_di:
+        {
+            const u16 bx = processor_state->registers[register_name_b];
+            const u16 di = processor_state->registers[register_name_di];
+            result += bx+di;
+        } break;
+        
+        case memory_address_expression_bp_plus_si:
+        {
+            const u16 bp = processor_state->registers[register_name_bp];
+            const u16 si = processor_state->registers[register_name_si];
+            result += bp+si;
+        } break;
+        
+        case memory_address_expression_bp_plus_di:
+        {
+            const u16 bp = processor_state->registers[register_name_bp];
+            const u16 di = processor_state->registers[register_name_di];
+            result += bp+di;
+        } break;
+        
+        case memory_address_expression_si:
+        {
+            const u16 si = processor_state->registers[register_name_si];
+            result += si;
+        } break;
+        
+        case memory_address_expression_di:
+        {
+            const u16 di = processor_state->registers[register_name_di];
+            result += di;
+        } break;
+        
+        case memory_address_expression_bp:
+        {
+            const u16 bp = processor_state->registers[register_name_bp];
+            result += bp;
+        } break;
+        
+        case memory_address_expression_bx:
+        {
+            const u16 bx = processor_state->registers[register_name_b];
+            result += bx;
+        } break;
+        
+        default:
+        assert(false);
+    }
+    
+    result += mem_op->displacement;
+    
+    return result;
+}
+
+static u16 get_processor_flags(const u16 value)
 {
     const uint32_t Bit_ZF = 6;
     const uint32_t Bit_SF = 7;
     
-    uint16_t result = 0;
+    u16 result = 0;
     
-    if (ref_value == 0) // ZF
+    if (value == 0) // ZF
     {
         result |= (0x1 << Bit_ZF);
     }
-    else if ((int16_t)ref_value < 0) // SF
+    else if ((s16)value < 0) // SF
     {
         result|= (0x1 << Bit_SF);
     }
@@ -459,20 +536,22 @@ static uint16_t get_processor_flags(const uint16_t ref_value)
     return result;
 }
 
+// NOTE(achal): Printing
+
 #define file_print(file, fmt, ...)\
 {\
 const int retval = fprintf(file, fmt, ##__VA_ARGS__);\
 assert(retval >= 0);\
 }
 
-static uint8_t print_signed_constant(int32_t constant, char *dst)
+static u8 print_signed_constant(int32_t constant, char *dst)
 {
-    uint8_t result = 0;
+    u8 result = 0;
     if (constant >= 0)
         dst[result++] = '+';
     
     // TODO(achal): Could I have just used "%+d"?
-    const uint8_t chars_written = (uint8_t)sprintf(dst+result, "%d", constant);
+    const u8 chars_written = (u8)sprintf(dst+result, "%d", constant);
     result += chars_written;
     
     return result;
@@ -503,11 +582,14 @@ static void print_register_operand(FILE *file, register_operand_t op)
 
 static void print_memory_operand(FILE *file, memory_operand_t op)
 {
-    uint8_t len = 0;
+    u8 len = 0;
     char expression[32];
     {
         expression[len++] = '[';
         
+        const bool has_direct_address = (op.address_expression == memory_address_expression_count);
+        
+        if (!has_direct_address)
         {
             const char *table[] =
             {
@@ -521,17 +603,17 @@ static void print_memory_operand(FILE *file, memory_operand_t op)
                 "bx"
             };
             
-            const uint8_t chars_written = (uint8_t)sprintf(expression+len, "%s", table[op.address_expression]);
+            assert(op.address_expression < memory_address_expression_count);
+            const u8 chars_written = (u8)sprintf(expression+len, "%s", table[op.address_expression]);
             len += chars_written;
         }
         
         {
-            const bool has_direct_address = (op.address_expression == memory_address_expression_count);
             const bool has_disp = !has_direct_address && (op.displacement != 0);
             
             if (has_direct_address)
             {
-                const uint8_t chars_written = (uint8_t)sprintf(expression+len, "%d", op.displacement);
+                const u8 chars_written = (u8)sprintf(expression+len, "%d", op.displacement);
                 // sprintf will also write the null character, but we will overwrite it because
                 // we still need to add more stuff to the string. Also note that `chars_written`
                 // will not include the null character.
@@ -541,7 +623,7 @@ static void print_memory_operand(FILE *file, memory_operand_t op)
             {
                 // NOTE(achal): Displacement to memory addresses should always fit in 16 bits.
                 assert(op.displacement <= UINT16_MAX);
-                const uint8_t chars_written = print_signed_constant(op.displacement, expression+len);
+                const u8 chars_written = print_signed_constant(op.displacement, expression+len);
                 len += chars_written;
             }
         }
@@ -557,17 +639,17 @@ static void print_memory_operand(FILE *file, memory_operand_t op)
 
 static void print_immediate(FILE *file, immediate_operand_t op, const char *size_expression)
 {
-    uint8_t len = 0;
+    u8 len = 0;
     char expression[16];
     {
         if (size_expression)
         {
-            const uint8_t chars_written = (uint8_t)sprintf(expression+len, "%s ", size_expression);
+            const u8 chars_written = (u8)sprintf(expression+len, "%s ", size_expression);
             len += chars_written;
         }
         
         {
-            const uint8_t chars_written = (uint8_t)sprintf(expression+len, "%d", op.value);
+            const u8 chars_written = (u8)sprintf(expression+len, "%d", op.value);
             len += chars_written;
         }
         
@@ -580,13 +662,13 @@ static void print_immediate(FILE *file, immediate_operand_t op, const char *size
 
 static void print_relative_jump_immediate(FILE *file, relative_jump_immediate_operand_t op)
 {
-    uint8_t len = 0;
+    u8 len = 0;
     char expression[8];
     {
         expression[len++] = '$';
         
         // NOTE(achal): NASM will add a -2 by itself to the relative jump immediate so add 2 to counter that.
-        const uint8_t chars_written = print_signed_constant(op.value+2, expression+len);
+        const u8 chars_written = print_signed_constant(op.value+2, expression+len);
         len += chars_written;
         
         assert(len < core_array_count(expression));
@@ -675,13 +757,13 @@ static void print_instruction(FILE *file, const instruction_t *instruction)
     }
 }
 
-static void print_processor_flags(FILE *file, uint16_t flags)
+static void print_processor_flags(FILE *file, u16 flags)
 {
     const char *flags_name_table[] = { "CF", "", "PF", "", "AF", "", "ZF", "SF", "TF", "IF", "DF", "OF", "", "", "", "" };
     
     for (uint32_t i = 0; i < 16; ++i)
     {
-        const uint16_t mask = (0x1 << i);
+        const u16 mask = (0x1 << i);
         if (flags & mask)
             file_print(file, "%s", flags_name_table[i]);
     }
@@ -696,7 +778,7 @@ int main(int argc, char **argv)
         return -1;
     }
     
-    bool is_execution_mode = false;
+    bool is_simulation_mode = false;
     const char *in_file_path = NULL;
     const char *out_file_path = NULL;
     
@@ -706,7 +788,7 @@ int main(int argc, char **argv)
         const char exec_flag_str[] = "-exec";
         if (strcmp(argv[i], exec_flag_str) == 0)
         {
-            is_execution_mode = true;
+            is_simulation_mode = true;
             continue;
         }
         
@@ -725,8 +807,9 @@ int main(int argc, char **argv)
         LOG_WARNING("Unknown flag recieved: %s. Ignoring..", argv[i]);
     }
     
-    uint32_t assembled_code_size = 0;
-    uint8_t *assembled_code = NULL;
+    
+    u32 assembled_code_size = 0;
+    u8 *assembled_code = NULL;
     {
         if (!in_file_path)
         {
@@ -744,7 +827,7 @@ int main(int argc, char **argv)
         fseek(file, 0, SEEK_END);
         assembled_code_size = ftell(file);
         
-        assembled_code = (uint8_t *)malloc(assembled_code_size);
+        assembled_code = (u8 *)malloc(assembled_code_size);
         
         fseek(file, 0, SEEK_SET);
         fread(assembled_code, 1, assembled_code_size, file);
@@ -766,46 +849,31 @@ int main(int argc, char **argv)
         }
     }
     
-    if (is_execution_mode)
-    {
-        const char *file_name = in_file_path;
-        {
-            const char *listing_name = strchr(in_file_path, '/');
-            if (!listing_name)
-                listing_name = strchr(in_file_path, '\\');
-            
-            if (listing_name && (strlen(listing_name) > 1))
-                file_name = listing_name+1; // eat up the slash
-        }
-        
-        file_print(out_file, "--- test\\%s execution ---\n", file_name);
-    }
-    else
-    {
-        file_print(out_file, "bits 16\n\n");
-    }
+    file_print(out_file, "bits 16\n\n");
     
+    enum { ProcessorMemorySize = 1*1024*1024u };
     processor_state_t processor_state = { 0 };
-    
-    // TODO(achal): Now, since, I save the starting address of each instruction I don't think
-    // I have to keep track of this value anymore. This will get more and more unused and
-    // hard-to-make-sense-of as I implement jumps.
-    uint32_t decoded_instruction_count = 0;
+    if (is_simulation_mode)
+    {
+        processor_state.memory = (u8 *)malloc(ProcessorMemorySize);
+        assert(processor_state.memory);
+    }
     
     while (processor_state.ip < assembled_code_size)
     {
         instruction_t instruction = { 0 };
+        
         instruction.address = assembled_code + (size_t)processor_state.ip;
         
         enum { MinOPCodeBitCount = 4 };
         enum { MaxOPCodeBitCount = 8 };
         
-        const uint8_t opcode_byte = instruction.address[instruction.size++];
+        const u8 opcode_byte = instruction.address[instruction.size++];
         
         bool op_code_found = false;
-        for (uint8_t opcode_bit_count = MaxOPCodeBitCount; opcode_bit_count >= MinOPCodeBitCount; --opcode_bit_count)
+        for (u8 opcode_bit_count = MaxOPCodeBitCount; opcode_bit_count >= MinOPCodeBitCount; --opcode_bit_count)
         {
-            const uint8_t opcode = bitfield_extract(opcode_byte, 8-opcode_bit_count, opcode_bit_count);
+            const u8 opcode = bitfield_extract(opcode_byte, 8-opcode_bit_count, opcode_bit_count);
             
             instruction.op_type = get_op_type(opcode, 0xFF, opcode_bit_count);
             if (instruction.op_type == op_type_count)
@@ -821,12 +889,12 @@ int main(int argc, char **argv)
                 case 0b001110:  // cmp, Register/memory to/from register
                 {
                     instruction.w = bitfield_extract(opcode_byte, 0, 1);
-                    const uint8_t d = bitfield_extract(opcode_byte, 1, 1);
+                    const u8 d = bitfield_extract(opcode_byte, 1, 1);
                     
-                    const uint8_t mod_reg_r_m_byte = instruction.address[instruction.size++];
-                    const uint8_t mod = bitfield_extract(mod_reg_r_m_byte, 6, 2);
-                    const uint8_t reg = bitfield_extract(mod_reg_r_m_byte, 3, 3);
-                    const uint8_t r_m = bitfield_extract(mod_reg_r_m_byte, 0, 3);
+                    const u8 mod_reg_r_m_byte = instruction.address[instruction.size++];
+                    const u8 mod = bitfield_extract(mod_reg_r_m_byte, 6, 2);
+                    const u8 reg = bitfield_extract(mod_reg_r_m_byte, 3, 3);
+                    const u8 r_m = bitfield_extract(mod_reg_r_m_byte, 0, 3);
                     
                     const bool is_wide = (instruction.w == 0x1);
                     
@@ -844,8 +912,8 @@ int main(int argc, char **argv)
                 case 0b1100011: // mov, Immediate to register/memory
                 case 0b100000:  // add or sub or cmp, Immediate to register/memory
                 {
-                    const uint8_t mod_extra_opcode_r_m_byte = instruction.address[instruction.size++];
-                    const uint8_t extra_opcode = bitfield_extract(mod_extra_opcode_r_m_byte, 3, 3);
+                    const u8 mod_extra_opcode_r_m_byte = instruction.address[instruction.size++];
+                    const u8 extra_opcode = bitfield_extract(mod_extra_opcode_r_m_byte, 3, 3);
                     instruction.op_type = get_op_type(opcode, extra_opcode, opcode_bit_count);
                     if (instruction.op_type == op_type_add_sub_cmp)
                     {
@@ -857,11 +925,11 @@ int main(int argc, char **argv)
                     instruction.w = bitfield_extract(opcode_byte, 0, 1);
                     const bool is_wide = (instruction.w == 0x1);
                     
-                    const uint8_t s = bitfield_extract(opcode_byte, 1, 1);
+                    const u8 s = bitfield_extract(opcode_byte, 1, 1);
                     const bool should_sign_extend = (instruction.op_type == op_type_mov) ? false : (s == 0x1);
                     
-                    const uint8_t mod = bitfield_extract(mod_extra_opcode_r_m_byte, 6, 2);
-                    const uint8_t r_m = bitfield_extract(mod_extra_opcode_r_m_byte, 0, 3);
+                    const u8 mod = bitfield_extract(mod_extra_opcode_r_m_byte, 6, 2);
+                    const u8 r_m = bitfield_extract(mod_extra_opcode_r_m_byte, 0, 3);
                     if (mod == 0x3)
                     {
                         assert(instruction.op_type != op_type_mov && "The mov instruction usually doesn't take this path. There is a separate opcode for this for mov.");
@@ -882,7 +950,7 @@ int main(int argc, char **argv)
                     
                     instruction.size += get_immediate_operand(&instruction.operands[1], false, is_wide, instruction.address + instruction.size);
                     
-                    const uint8_t reg = bitfield_extract(opcode_byte, 0, 3);
+                    const u8 reg = bitfield_extract(opcode_byte, 0, 3);
                     instruction.operands[0] = get_register_operand(reg, is_wide);
                 } break;
                 
@@ -950,17 +1018,16 @@ int main(int argc, char **argv)
             return -1;
         }
         
-        ++decoded_instruction_count;
-        
         // Print instructions and/or trace
         {
             assert(out_file);
             
             const processor_state_t prev_processor_state = processor_state;
             
+            print_instruction(out_file, &instruction);
             processor_state.ip += instruction.size;
             
-            if (is_execution_mode)
+            if (is_simulation_mode)
             {
                 if (out_file_path)
                 {
@@ -970,7 +1037,6 @@ int main(int argc, char **argv)
                     if (!extension || (strcmp(extension, txt_extension_str) != 0))
                         LOG_WARNING("Execution mode is enabled, output will be a text file but .txt extension not detected in the output path: %s", out_file_path);
                 }
-                print_instruction(out_file, &instruction);
                 
                 const instruction_operand_t *src_op = &instruction.operands[1];
                 const instruction_operand_t *dst_op = &instruction.operands[0];
@@ -980,71 +1046,144 @@ int main(int argc, char **argv)
                     dst_op = NULL;
                 }
                 
-                uint32_t src_value = 0xFFFFFFFF;
-                switch (src_op->type)
-                {
-                    case instruction_operand_type_register:
-                    {
-                        const uint32_t src_reg_idx = (uint32_t)src_op->payload.reg.name;
-                        src_value = (uint32_t)processor_state.registers[src_reg_idx];
-                    } break;
-                    
-                    case instruction_operand_type_memory:
-                    {
-                        assert(false);
-                    } break;
-                    
-                    case instruction_operand_type_immediate:
-                    {
-                        src_value = (uint32_t)src_op->payload.imm.value;
-                    } break;
-                    
-                    case instruction_operand_type_relative_jump_immediate:
-                    {
-                        src_value = (uint32_t)src_op->payload.rel_jump_imm.value;
-                    } break;
-                }
-                assert(src_value != 0xFFFFFFFF);
                 
-                uint32_t dst_reg_idx = UINT32_MAX;
+                u16 src = 0;
+                {
+                    assert(src_op);
+                    
+                    switch (src_op->type)
+                    {
+                        case instruction_operand_type_register:
+                        {
+                            const register_operand_t *op = &src_op->payload.reg;
+                            
+                            const u32 idx = (u32)op->name;
+                            src = processor_state.registers[idx];
+                            if (op->count == 1)
+                            {
+                                assert(!instruction.w);
+                                
+                                src >>= (8*op->offset);
+                                src &= 0xFF;
+                            }
+                        } break;
+                        
+                        case instruction_operand_type_memory:
+                        {
+                            const memory_operand_t *op = &src_op->payload.mem;
+                            
+                            const u32 addr = get_effective_address(op, &processor_state);
+                            assert(dst_op);
+                            assert(dst_op->type != instruction_operand_type_memory);
+                            assert((dst_op->type == instruction_operand_type_register));
+                            
+                            const u16 byte1 = processor_state.memory[addr];
+                            u16 byte2 = 0;
+                            if (instruction.w)
+                                byte2 = processor_state.memory[addr+1];
+                            
+                            src = (byte2 << 8) | byte1;
+                        } break;
+                        
+                        case instruction_operand_type_immediate:
+                        {
+                            src = (u16)src_op->payload.imm.value;
+                        } break;
+                        
+                        case instruction_operand_type_relative_jump_immediate:
+                        {
+                            src = (u16)src_op->payload.rel_jump_imm.value;
+                        } break;
+                        
+                        default:
+                        assert(false);
+                    }
+                }
+                
+                
+                // TODO(achal): Can I remove this now?
+                u32 dst_reg_idx = UINT32_MAX;
+                
+                const u32 dst_size = instruction.w ? 2 : 1;
+                u8 *dst = NULL;
+                
                 if (dst_op)
                 {
-                    assert(dst_op->type == instruction_operand_type_register);
-                    dst_reg_idx = (uint32_t)dst_op->payload.reg.name;
+                    switch (dst_op->type)
+                    {
+                        case instruction_operand_type_register:
+                        {
+                            const register_operand_t *reg_op = &dst_op->payload.reg;
+                            
+                            const u32 idx = (u32)reg_op->name;
+                            assert(idx < register_name_count);
+                            
+                            assert(reg_op->offset <= 1);
+                            dst = (u8 *)(processor_state.registers + idx + (1-reg_op->offset));
+                        } break;
+                        
+                        case instruction_operand_type_memory:
+                        {
+                            const memory_operand_t *mem_op = &dst_op->payload.mem;
+                            const u32 addr = get_effective_address(mem_op, &processor_state);
+                            dst = processor_state.memory + addr;
+                        } break;
+                        
+                        default:
+                        assert(false);
+                    }
                 }
                 
                 switch (instruction.op_type)
                 {
                     case op_type_mov:
                     {
-                        processor_state.registers[dst_reg_idx] = (uint16_t)src_value;
+                        // processor_state.registers[dst_reg_idx] = src;
+                        
+                        if (dst_size == 2)
+                        {
+                            dst[0] = (src & 0xFF);
+                            dst[1] = (src >> 8) & 0xFF;
+                        }
+                        else if (dst_size == 1)
+                        {
+                            dst[0] = (u8)src;
+                        }
+                        else
+                        {
+                            assert(false);
+                        }
                     } break;
                     
                     case op_type_add:
                     {
-                        processor_state.registers[dst_reg_idx] += (uint16_t)src_value;
+                        assert(false);
+                        processor_state.registers[dst_reg_idx] += (u16)src;
                         processor_state.flags = get_processor_flags(processor_state.registers[dst_reg_idx]);
                     } break;
                     
                     case op_type_sub:
                     {
-                        processor_state.registers[dst_reg_idx] -= (uint16_t)src_value;
+                        assert(false);
+                        processor_state.registers[dst_reg_idx] -= (u16)src;
                         processor_state.flags = get_processor_flags(processor_state.registers[dst_reg_idx]);
                     } break;
                     
                     case op_type_cmp:
                     {
-                        uint16_t temp = processor_state.registers[dst_reg_idx] - (uint16_t)src_value;
+                        assert(false);
+                        u16 temp = processor_state.registers[dst_reg_idx] - (u16)src;
                         processor_state.flags = get_processor_flags(temp);
                     } break;
                     
                     case op_type_jnz:
                     {
-                        const uint32_t Bit_ZF = 6;
+                        assert(false);
+                        const u32 Bit_ZF = 6;
                         if ((processor_state.flags & (0x1 << Bit_ZF)) == 0)
                         {
                             assert(processor_state.ip != 0);
-                            processor_state.ip += (uint16_t)src_value;
+                            processor_state.ip += (u16)src;
                         }
                     } break;
                     
@@ -1079,19 +1218,15 @@ int main(int argc, char **argv)
                     print_processor_flags(out_file, processor_state.flags);
                 }
             }
-            else
-            {
-                print_instruction(out_file, &instruction);
-            }
             
             file_print(out_file, "\n");
         }
     }
     
-    if (is_execution_mode)
+    if (is_simulation_mode)
     {
         file_print(out_file, "\nFinal registers:\n");
-        for (uint32_t i = 0; i < register_name_count; ++i)
+        for (u32 i = 0; i < register_name_count; ++i)
         {
             const char *name = NULL;
             {
@@ -1113,8 +1248,6 @@ int main(int argc, char **argv)
     
     if (out_file != stdout)
         fclose(out_file);
-    
-    LOG_INFO("Instructions decoded: %u", decoded_instruction_count);
     
     return 0;
 }
