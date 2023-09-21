@@ -1100,9 +1100,6 @@ int main(int argc, char **argv)
                     }
                 }
                 
-                // TODO(achal): Remove.
-                u32 dst_reg_idx = UINT32_MAX;
-                
                 const u32 dst_size = instruction.w ? 2 : 1;
                 u8 *dst = NULL;
                 
@@ -1138,13 +1135,25 @@ int main(int argc, char **argv)
                     case op_type_mov:
                     {
                         if (dst_size == 2)
+                            *((u16 *)dst) = src;
+                        else if (dst_size == 1)
+                            *dst = (u8)src;
+                        else
+                            assert(false);
+                    } break;
+                    
+                    case op_type_add:
+                    {
+                        if (dst_size == 2)
                         {
-                            dst[0] = (src & 0xFF);
-                            dst[1] = (src >> 8) & 0xFF;
+                            u16 *dst_16 = (u16 *)dst;
+                            *dst_16 += src;
+                            processor_state.flags = get_processor_flags(*dst_16);
                         }
                         else if (dst_size == 1)
                         {
-                            dst[0] = (u8)src;
+                            *dst += (u8)src;
+                            processor_state.flags = get_processor_flags(*dst);
                         }
                         else
                         {
@@ -1152,38 +1161,51 @@ int main(int argc, char **argv)
                         }
                     } break;
                     
-                    case op_type_add:
-                    {
-                        // TODO(achal): Use dst and dst_size here
-                        assert(false);
-                        processor_state.registers[dst_reg_idx] += (u16)src;
-                        processor_state.flags = get_processor_flags(processor_state.registers[dst_reg_idx]);
-                    } break;
-                    
                     case op_type_sub:
                     {
-                        // TODO(achal): Use dst and dst_size here
-                        assert(false);
-                        processor_state.registers[dst_reg_idx] -= (u16)src;
-                        processor_state.flags = get_processor_flags(processor_state.registers[dst_reg_idx]);
+                        if (dst_size == 2)
+                        {
+                            u16 *dst_16 = (u16 *)dst;
+                            *dst_16 -= src;
+                            processor_state.flags = get_processor_flags(*dst_16);
+                        }
+                        else if (dst_size == 1)
+                        {
+                            *dst -= (u8)src;
+                            processor_state.flags = get_processor_flags(*dst);
+                        }
+                        else
+                        {
+                            assert(false);
+                        }
                     } break;
                     
                     case op_type_cmp:
                     {
-                        // TODO(achal): Use dst and dst_size here
-                        assert(false);
-                        u16 temp = processor_state.registers[dst_reg_idx] - (u16)src;
+                        u16 temp = UINT16_MAX;
+                        if (dst_size == 2)
+                        {
+                            u16 *dst_16 = (u16 *)dst;
+                            temp = *dst_16 - src;
+                        }
+                        else if (dst_size == 1)
+                        {
+                            temp = *dst - (u8)src;
+                        }
+                        else
+                        {
+                            assert(false);
+                        }
                         processor_state.flags = get_processor_flags(temp);
                     } break;
                     
                     case op_type_jnz:
                     {
-                        assert(false);
                         const u32 Bit_ZF = 6;
                         if ((processor_state.flags & (0x1 << Bit_ZF)) == 0)
                         {
                             assert(processor_state.ip != 0);
-                            processor_state.ip += (u16)src;
+                            processor_state.ip += src;
                         }
                     } break;
                     
