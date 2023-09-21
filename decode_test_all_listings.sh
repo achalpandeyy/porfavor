@@ -30,7 +30,7 @@ GREEN='\033[0;32m'
 NC='\033[0m' # No Color
 
 for file in "${assembled_listings[@]}"; do
-	./test_listing.sh "tests/$file" > /dev/null 2>&1
+	./decode_test_listing.sh "tests/$file" > /dev/null 2>&1
 	status=$?
 	if [ $status -eq 0 ]; then
 		echo -e "$file ${GREEN}[Passed]${NC}"
