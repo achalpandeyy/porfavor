@@ -1,4 +1,4 @@
-#include "core/logger/logger.h"
+#include "logger.h"
 
 #define LOG_INFO(fmt, ...) core_logger_log(core_logger_level_info, fmt, ##__VA_ARGS__)
 #define LOG_DEBUG(fmt, ...) core_logger_log(core_logger_level_debug, fmt, ##__VA_ARGS__)
@@ -1138,8 +1138,6 @@ int main(int argc, char **argv)
                 {
                     case op_type_mov:
                     {
-                        // processor_state.registers[dst_reg_idx] = src;
-                        
                         if (dst_size == 2)
                         {
                             dst[0] = (src & 0xFF);
@@ -1192,7 +1190,17 @@ int main(int argc, char **argv)
                     break;
                 }
                 
+                //- Print trace
                 file_print(out_file, " ;");
+                {
+                    // Print out changes in register state
+                    
+                    // Print out ip
+                    
+                    // Print out changes in flags
+                    
+                    // We don't print out changes in memory
+                }
                 
                 if (dst_op)
                 {
