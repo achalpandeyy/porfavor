@@ -507,9 +507,6 @@ static u32 get_effective_address(const memory_operand_t *mem_op, const processor
             const u16 bx = processor_state->registers[register_name_b];
             result += bx;
         } break;
-        
-        default:
-        assert(false);
     }
     
     result += mem_op->displacement;
@@ -1073,10 +1070,9 @@ int main(int argc, char **argv)
                             const memory_operand_t *op = &src_op->payload.mem;
                             
                             const u32 addr = get_effective_address(op, &processor_state);
-                            assert(dst_op);
-                            assert(dst_op->type != instruction_operand_type_memory);
-                            assert((dst_op->type == instruction_operand_type_register));
+                            assert(dst_op && (dst_op->type == instruction_operand_type_register));
                             
+                            // TODO(achal): You can most likely just cast and deref here
                             const u16 byte1 = processor_state.memory[addr];
                             u16 byte2 = 0;
                             if (instruction.w)
@@ -1214,31 +1210,40 @@ int main(int argc, char **argv)
                     break;
                 }
                 
-                //- Print trace
+                //-print trace
                 file_print(out_file, " ;");
                 {
-                    // Print out changes in register state
+                    //-register and memory (in the future) state
                     if (dst_op)
                     {
-                        assert(dst_op->type == instruction_operand_type_register && "We don't know how to print out memory yet");
-                        const register_operand_t *reg_op = &dst_op->payload.reg;
-                        
-                        const u32 idx = (u32)reg_op->name;
-                        
-                        if (prev_processor_state.registers[idx] != processor_state.registers[idx])
+                        switch (dst_op->type)
                         {
-                            const char *reg_name = get_register_name(&dst_op->payload.reg);
-                            file_print(out_file, " %s:0x%X->0x%X", reg_name, prev_processor_state.registers[idx], processor_state.registers[idx]);
+                            case instruction_operand_type_register:
+                            {
+                                const register_operand_t *reg_op = &dst_op->payload.reg;
+                                const u32 idx = (u32)reg_op->name;
+                                
+                                if (prev_processor_state.registers[idx] != processor_state.registers[idx])
+                                {
+                                    const char *name = get_register_name(&dst_op->payload.reg);
+                                    file_print(out_file, " %s:0x%X->0x%X", name, prev_processor_state.registers[idx], processor_state.registers[idx]);
+                                }
+                            } break;
+                            
+                            /*case instruction_operand_type_memory:
+                            {
+                                // This will make sense when I have GUI, so it becomes easier to print out memory.
+                            } break;*/
                         }
                     }
                     
-                    // Print out ip
+                    //-ip
                     if (prev_processor_state.ip != processor_state.ip)
                     {
                         file_print(out_file, " ip:0x%X->0x%X", prev_processor_state.ip, processor_state.ip);
                     }
                     
-                    // Print out changes in flags
+                    //-flags
                     if (prev_processor_state.flags != processor_state.flags)
                     {
                         file_print(out_file, " flags:");
