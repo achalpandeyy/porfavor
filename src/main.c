@@ -1100,8 +1100,7 @@ int main(int argc, char **argv)
                     }
                 }
                 
-                
-                // TODO(achal): Can I remove this now?
+                // TODO(achal): Remove.
                 u32 dst_reg_idx = UINT32_MAX;
                 
                 const u32 dst_size = instruction.w ? 2 : 1;
@@ -1119,7 +1118,7 @@ int main(int argc, char **argv)
                             assert(idx < register_name_count);
                             
                             assert(reg_op->offset <= 1);
-                            dst = (u8 *)(processor_state.registers + idx + (1-reg_op->offset));
+                            dst = (u8 *)(processor_state.registers + idx) + reg_op->offset;
                         } break;
                         
                         case instruction_operand_type_memory:
@@ -1155,6 +1154,7 @@ int main(int argc, char **argv)
                     
                     case op_type_add:
                     {
+                        // TODO(achal): Use dst and dst_size here
                         assert(false);
                         processor_state.registers[dst_reg_idx] += (u16)src;
                         processor_state.flags = get_processor_flags(processor_state.registers[dst_reg_idx]);
@@ -1162,6 +1162,7 @@ int main(int argc, char **argv)
                     
                     case op_type_sub:
                     {
+                        // TODO(achal): Use dst and dst_size here
                         assert(false);
                         processor_state.registers[dst_reg_idx] -= (u16)src;
                         processor_state.flags = get_processor_flags(processor_state.registers[dst_reg_idx]);
@@ -1169,6 +1170,7 @@ int main(int argc, char **argv)
                     
                     case op_type_cmp:
                     {
+                        // TODO(achal): Use dst and dst_size here
                         assert(false);
                         u16 temp = processor_state.registers[dst_reg_idx] - (u16)src;
                         processor_state.flags = get_processor_flags(temp);
@@ -1194,36 +1196,34 @@ int main(int argc, char **argv)
                 file_print(out_file, " ;");
                 {
                     // Print out changes in register state
+                    if (dst_op)
+                    {
+                        assert(dst_op->type == instruction_operand_type_register && "We don't know how to print out memory yet");
+                        const register_operand_t *reg_op = &dst_op->payload.reg;
+                        
+                        const u32 idx = (u32)reg_op->name;
+                        
+                        if (prev_processor_state.registers[idx] != processor_state.registers[idx])
+                        {
+                            const char *reg_name = get_register_name(&dst_op->payload.reg);
+                            file_print(out_file, " %s:0x%X->0x%X", reg_name, prev_processor_state.registers[idx], processor_state.registers[idx]);
+                        }
+                    }
                     
                     // Print out ip
+                    if (prev_processor_state.ip != processor_state.ip)
+                    {
+                        file_print(out_file, " ip:0x%X->0x%X", prev_processor_state.ip, processor_state.ip);
+                    }
                     
                     // Print out changes in flags
-                    
-                    // We don't print out changes in memory
-                }
-                
-                if (dst_op)
-                {
-                    assert(dst_reg_idx != UINT32_MAX);
-                    
-                    if (prev_processor_state.registers[dst_reg_idx] != processor_state.registers[dst_reg_idx])
+                    if (prev_processor_state.flags != processor_state.flags)
                     {
-                        const char *reg_name = get_register_name(&dst_op->payload.reg);
-                        file_print(out_file, " %s:0x%X->0x%X", reg_name, prev_processor_state.registers[dst_reg_idx], processor_state.registers[dst_reg_idx]);
+                        file_print(out_file, " flags:");
+                        print_processor_flags(out_file, prev_processor_state.flags);
+                        file_print(out_file, "->");
+                        print_processor_flags(out_file, processor_state.flags);
                     }
-                }
-                
-                if (prev_processor_state.ip != processor_state.ip)
-                {
-                    file_print(out_file, " ip:0x%X->0x%X", prev_processor_state.ip, processor_state.ip);
-                }
-                
-                if (prev_processor_state.flags != processor_state.flags)
-                {
-                    file_print(out_file, " flags:");
-                    print_processor_flags(out_file, prev_processor_state.flags);
-                    file_print(out_file, "->");
-                    print_processor_flags(out_file, processor_state.flags);
                 }
             }
             
