@@ -776,6 +776,7 @@ int main(int argc, char **argv)
     }
     
     bool is_simulation_mode = false;
+    bool should_dump_memory = false;
     const char *in_file_path = NULL;
     const char *out_file_path = NULL;
     
@@ -786,6 +787,13 @@ int main(int argc, char **argv)
         if (strcmp(argv[i], exec_flag_str) == 0)
         {
             is_simulation_mode = true;
+            continue;
+        }
+        
+        const char dump_flag_str[] = "-dump";
+        if (strcmp(argv[i], dump_flag_str) == 0)
+        {
+            should_dump_memory = true;
             continue;
         }
         
@@ -824,6 +832,7 @@ int main(int argc, char **argv)
         fseek(file, 0, SEEK_END);
         assembled_code_size = ftell(file);
         
+        // TODO(achal): This should go onto the processor's 1MB memory
         assembled_code = (u8 *)malloc(assembled_code_size);
         
         fseek(file, 0, SEEK_SET);
@@ -1283,6 +1292,26 @@ int main(int argc, char **argv)
     
     if (out_file != stdout)
         fclose(out_file);
+    
+    if (should_dump_memory)
+    {
+        if (!is_simulation_mode)
+            LOG_WARNING("User has asked to dump memory but no simulation was performed so memory will be garbage");
+        
+        const char path[] = "memory_dump.data";
+        FILE *file = fopen(path, "wb");
+        if (!file)
+        {
+            LOG_ERROR("Could not open file for writing: %s", path);
+            return -1;
+        }
+        
+        const size_t bytes_written = fwrite(processor_state.memory, 1, ProcessorMemorySize, file);
+        if (bytes_written < ProcessorMemorySize)
+            LOG_WARNING("Only %llu (out of %u) bytes were written successfully", bytes_written, ProcessorMemorySize);
+        
+        fclose(file);
+    }
     
     return 0;
 }

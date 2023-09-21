@@ -23,6 +23,8 @@ assembled_listings=(
 	"listing_0051_memory_mov"
 	"listing_0052_memory_add_loop"
 	"listing_0053_add_loop_challenge"
+	"listing_0054_draw_rectangle"
+	"listing_0055_challenge_rectangle"
 )
 
 RED='\033[0;31m'
