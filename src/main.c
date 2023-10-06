@@ -291,6 +291,9 @@ struct instruction_t
     // the disassembly instruction, this is usually the destination operand.
     // For instructions which have only one operand, operand[0] will be used.
     instruction_operand_t operands[2];
+    
+    u32 op_clocks;
+    u32 ea_clocks;
 };
 
 static instruction_operand_t get_register_operand(u8 index, bool is_wide)
@@ -533,7 +536,26 @@ static u16 get_processor_flags(const u16 value)
     return result;
 }
 
-// NOTE(achal): Printing
+static u32 get_effective_address_clocks(memory_address_expression_t expression, int has_disp)
+{
+    if (expression == memory_address_expression_count)
+    {
+        // NOTE(achal): Direct address case
+        assert(has_disp);
+        return 6;
+    }
+    
+    // NOTE(achal): Table 2-20 of the manual
+    static u32 ea_clocks_table[] = { 7, 8, 8, 7, 5, 5, 5, 5 };
+    assert(core_array_count(ea_clocks_table) == memory_address_expression_count);
+    
+    u32 result = ea_clocks_table[expression];
+    if (has_disp)
+        result += 4;
+    return result;
+}
+
+//- NOTE(achal): Printing
 
 #define file_print(file, fmt, ...)\
 {\
@@ -777,41 +799,53 @@ int main(int argc, char **argv)
     
     bool is_simulation_mode = false;
     bool should_dump_memory = false;
+    bool show_clocks = false;
+    bool explain_clocks = false;
     const char *in_file_path = NULL;
     const char *out_file_path = NULL;
     
     // NOTE(achal): We assume that the first path will always be to the input file.
     for (int i = 1; i < argc; ++i)
     {
-        const char exec_flag_str[] = "-exec";
-        if (strcmp(argv[i], exec_flag_str) == 0)
+        if (argv[i][0] == '-')
         {
-            is_simulation_mode = true;
-            continue;
+            ++argv[i];
+            
+            const char exec_flag_str[] = "exec";
+            const char dump_flag_str[] = "dump";
+            const char showclocks_str[] = "showclocks";
+            const char explainclocks_str[] = "explainclocks";
+            
+            if (strcmp(argv[i], exec_flag_str) == 0)
+            {
+                is_simulation_mode = true;
+            }
+            else if (strcmp(argv[i], dump_flag_str) == 0)
+            {
+                should_dump_memory = true;
+            }
+            else if (strcmp(argv[i], showclocks_str) == 0)
+            {
+                show_clocks = true;
+            }
+            else if (strcmp(argv[i], explainclocks_str) == 0)
+            {
+                explain_clocks = true;
+            }
+            else
+            {
+                LOG_WARNING("Unknown flag: %s", argv[i]);
+            }
         }
-        
-        const char dump_flag_str[] = "-dump";
-        if (strcmp(argv[i], dump_flag_str) == 0)
-        {
-            should_dump_memory = true;
-            continue;
-        }
-        
-        if (!in_file_path)
+        else if (!in_file_path)
         {
             in_file_path = argv[i];
-            continue;
         }
-        
-        if (!out_file_path)
+        else if (!out_file_path)
         {
             out_file_path = argv[i];
-            continue;
         }
-        
-        LOG_WARNING("Unknown flag recieved: %s. Ignoring..", argv[i]);
     }
-    
     
     u32 assembled_code_size = 0;
     u8 *assembled_code = NULL;
@@ -864,6 +898,7 @@ int main(int argc, char **argv)
         processor_state.memory = (u8 *)malloc(ProcessorMemorySize);
         assert(processor_state.memory);
     }
+    u32 total_clocks = 0;
     
     while (processor_state.ip < assembled_code_size)
     {
@@ -890,7 +925,7 @@ int main(int argc, char **argv)
             switch (opcode)
             {
                 case 0b100010:  // mov, Register/memory to/from register
-                case 0b000000:  // add, Register/memroy to/from register
+                case 0b000000:  // add, Register/memory to/from register
                 case 0b001010:  // sub, Register/memory to/from register
                 case 0b001110:  // cmp, Register/memory to/from register
                 {
@@ -907,9 +942,50 @@ int main(int argc, char **argv)
                     instruction.operands[1] = get_register_operand(reg, is_wide);
                     
                     if (mod == 0x3)
+                    {
                         instruction.operands[0] = get_register_operand(r_m, is_wide);
+                        switch (instruction.op_type)
+                        {
+                            case op_type_mov:
+                            instruction.op_clocks = 2;
+                            break;
+                            
+                            case op_type_add:
+                            case op_type_sub:
+                            case op_type_cmp:
+                            instruction.op_clocks = 3;
+                            break;
+                            
+                            default:
+                            assert(false);
+                        }
+                    }
                     else
-                        instruction.size += get_memory_operand(&instruction.operands[0], r_m, mod, instruction.address + instruction.size);
+                    {
+                        u16 disp_size = get_memory_operand(&instruction.operands[0], r_m, mod, instruction.address + instruction.size);
+                        instruction.size += disp_size;
+                        
+                        switch (instruction.op_type)
+                        {
+                            case op_type_mov:
+                            instruction.op_clocks = (d == 0x0) ? 9 : 8;
+                            break;
+                            
+                            case op_type_add:
+                            case op_type_sub:
+                            instruction.op_clocks = (d == 0x0) ? 16 : 9;
+                            break;
+                            
+                            case op_type_cmp:
+                            instruction.op_clocks = 9;
+                            break;
+                            
+                            default:
+                            assert(false);
+                        }
+                        
+                        instruction.ea_clocks = get_effective_address_clocks(instruction.operands[0].payload.mem.address_expression, disp_size != 0);
+                    }
                     
                     if (d == 0x1)
                         core_swap(instruction.operands[0], instruction.operands[1], instruction_operand_t);
@@ -921,11 +997,10 @@ int main(int argc, char **argv)
                     const u8 mod_extra_opcode_r_m_byte = instruction.address[instruction.size++];
                     const u8 extra_opcode = bitfield_extract(mod_extra_opcode_r_m_byte, 3, 3);
                     instruction.op_type = get_op_type(opcode, extra_opcode, opcode_bit_count);
+                    
                     if (instruction.op_type == op_type_add_sub_cmp)
                     {
-                        op_code_found = false;
-                        assert(false);
-                        continue;
+                        assert(!"THIS CANNOT HAPPEN");
                     }
                     
                     instruction.w = bitfield_extract(opcode_byte, 0, 1);
@@ -940,13 +1015,34 @@ int main(int argc, char **argv)
                     {
                         assert(instruction.op_type != op_type_mov && "The mov instruction usually doesn't take this path. There is a separate opcode for this for mov.");
                         instruction.operands[0] = get_register_operand(r_m, is_wide);
+                        instruction.op_clocks = 4;
                     }
                     else
                     {
-                        instruction.size += get_memory_operand(&instruction.operands[0], r_m, mod, instruction.address + instruction.size);
+                        u16 disp_size = get_memory_operand(&instruction.operands[0], r_m, mod, instruction.address + instruction.size);
+                        instruction.size += disp_size;
+                        
+                        switch (instruction.op_type)
+                        {
+                            case op_type_mov:
+                            case op_type_cmp:
+                            instruction.op_clocks = 10;
+                            break;
+                            
+                            case op_type_add:
+                            case op_type_sub:
+                            instruction.op_clocks = 17;
+                            break;
+                            
+                            default:
+                            assert(false);
+                        }
+                        
+                        instruction.ea_clocks = get_effective_address_clocks(instruction.operands[0].payload.mem.address_expression, disp_size != 0);
                     }
                     
                     instruction.size += get_immediate_operand(&instruction.operands[1], should_sign_extend, is_wide, instruction.address+instruction.size);
+                    
                 } break;
                 
                 case 0b1011: // mov, Immediate to register
@@ -958,6 +1054,7 @@ int main(int argc, char **argv)
                     
                     const u8 reg = bitfield_extract(opcode_byte, 0, 3);
                     instruction.operands[0] = get_register_operand(reg, is_wide);
+                    instruction.op_clocks = 4;
                 } break;
                 
                 case 0b1010000: // mov, Memory to accumulator
@@ -968,6 +1065,9 @@ int main(int argc, char **argv)
                     
                     instruction.operands[0] = get_register_operand(0x0, instruction.w == 0x1);
                     instruction.size += get_memory_operand(&instruction.operands[1], 0x6, 0x0, instruction.address + instruction.size);
+                    
+                    // NOTE(achal): Shockingly there are no clocks associated with EA calculation here..
+                    instruction.op_clocks = 10;
                     
                     // NOTE(achal): Swap if it is Accumulator to memory
                     if (opcode == 0b1010001)
@@ -983,6 +1083,8 @@ int main(int argc, char **argv)
                     
                     instruction.size += get_immediate_operand(&instruction.operands[1], false, is_wide, instruction.address + instruction.size);
                     instruction.operands[0] = get_register_operand(0x0, is_wide);
+                    
+                    instruction.op_clocks = 4;
                 } break;
                 
                 case 0b01110100: // jz/je
@@ -1006,6 +1108,7 @@ int main(int argc, char **argv)
                 case 0b11100000: // loopnz/loopne
                 case 0b11100011: // jcxz
                 {
+                    assert(!show_clocks && !explain_clocks);
                     instruction.size += get_relative_jump_immediate_operand(&instruction.operands[0], instruction.address + instruction.size);
                     instruction.operands[1].type = instruction_operand_type_count;
                 } break;
@@ -1032,6 +1135,7 @@ int main(int argc, char **argv)
             
             print_instruction(out_file, &instruction);
             processor_state.ip += instruction.size;
+            total_clocks += instruction.op_clocks + instruction.ea_clocks;
             
             if (is_simulation_mode)
             {
@@ -1051,7 +1155,6 @@ int main(int argc, char **argv)
                     src_op = dst_op;
                     dst_op = NULL;
                 }
-                
                 
                 u16 src = 0;
                 {
@@ -1222,6 +1325,18 @@ int main(int argc, char **argv)
                 //-print trace
                 file_print(out_file, " ;");
                 {
+                    //-clocks
+                    if (show_clocks || explain_clocks)
+                    {
+                        u32 current_instruction_clocks = instruction.op_clocks + instruction.ea_clocks;
+                        file_print(out_file, " Clocks: +%u = %u", current_instruction_clocks, total_clocks);
+                        if (explain_clocks && (instruction.ea_clocks != 0))
+                        {
+                            file_print(out_file, " (%u + %uea)", instruction.op_clocks, instruction.ea_clocks);
+                        }
+                        file_print(out_file, " |");
+                    }
+                    
                     //-register and memory (in the future) state
                     if (dst_op)
                     {

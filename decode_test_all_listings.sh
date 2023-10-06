@@ -25,6 +25,8 @@ assembled_listings=(
 	"listing_0053_add_loop_challenge"
 	"listing_0054_draw_rectangle"
 	"listing_0055_challenge_rectangle"
+	"listing_0056_estimating_cycles"
+	"listing_0057_challenge_cycles"
 )
 
 RED='\033[0;31m'
