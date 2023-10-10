@@ -1,68 +1,10 @@
-// TODO(achal): Rename this file: haversine_generator.cpp because it is a generator of data.
-#include <stdio.h>
-#include <math.h>
-#include <stdint.h>
-#include <assert.h>
-
-typedef uint32_t u32;
-typedef uint64_t u64;
-typedef double f64;
+#include "haversine_common.h"
 
 #include <random>
 
-static f64 Square(f64 A)
-{
-    f64 Result = (A*A);
-    return Result;
-}
-
-static f64 RadiansFromDegrees(f64 Degrees)
-{
-    f64 Result = 0.01745329251994329577 * Degrees;
-    return Result;
-}
-
-// NOTE(casey): EarthRadius is generally expected to be 6372.8
-static f64 ReferenceHaversine(f64 X0, f64 Y0, f64 X1, f64 Y1, f64 EarthRadius)
-{
-    /* NOTE(casey): This is not meant to be a "good" way to calculate the Haversine distance.
-       Instead, it attempts to follow, as closely as possible, the formula used in the real-world
-       question on which these homework exercises are loosely based.
-    */
-    
-    f64 lat1 = Y0;
-    f64 lat2 = Y1;
-    f64 lon1 = X0;
-    f64 lon2 = X1;
-    
-    f64 dLat = RadiansFromDegrees(lat2 - lat1);
-    f64 dLon = RadiansFromDegrees(lon2 - lon1);
-    lat1 = RadiansFromDegrees(lat1);
-    lat2 = RadiansFromDegrees(lat2);
-    
-    f64 a = Square(sin(dLat/2.0)) + cos(lat1)*cos(lat2)*Square(sin(dLon/2));
-    f64 c = 2.0*asin(sqrt(a));
-    
-    f64 Result = EarthRadius * c;
-    
-    return Result;
-}
-
-static u64 parse_u64_from_string(const char *num_string)
-{
-    char *endptr = 0;
-    u64 result = (u64)strtoull(num_string, &endptr, 10);
-    if (endptr != num_string+strlen(num_string))
-    {
-        fprintf(stdout, "ERROR: Invalid number\n");
-        assert(false);
-    }
-    return result;
-}
-
 int main(int argc, char **argv)
 {
-    u64 max_pair_count = 10000000;
+    u64 max_pair_count = 100000000;
     
     if (argc != 4)
     {
@@ -95,8 +37,8 @@ int main(int argc, char **argv)
         return -1;
     }
     
-    u64 seed = parse_u64_from_string(argv[2]);
-    u64 pair_count = parse_u64_from_string(argv[3]);
+    u64 seed = ParseU64FromString(argv[2]);
+    u64 pair_count = ParseU64FromString(argv[3]);
     if (pair_count > max_pair_count)
     {
         fprintf(stderr, "Max pair count exceeded\n");
@@ -116,7 +58,8 @@ int main(int argc, char **argv)
     
     f64 earth_radius = 6372.8;
     
-    fprintf(json_file, "{\"pairs\":[\n");
+    fprintf(json_file, "{\n");
+    fprintf(json_file, "\t\"pairs\": [\n");
     
     f64 average = 0.0;
     
@@ -156,7 +99,7 @@ int main(int argc, char **argv)
                 
                 average += haversine_distance;
                 
-                fprintf(json_file, "\t{x0: \"%.18f\", y0: \"%.18f\", x1: \"%.18f\", y1: \"%.18f\"}", x0, y0, x1, y1);
+                fprintf(json_file, "\t\t{\"x0\": %.18f, \"y0\": %.18f, \"x1\": %.18f, \"y1\": %.18f}", x0, y0, x1, y1);
                 
                 pairs_picked++;
                 assert(pairs_picked <= pair_count);
@@ -173,10 +116,14 @@ int main(int argc, char **argv)
     
     end_picking:
     assert(pairs_picked == pair_count);
-    fprintf(json_file, "]}\n");
+    fprintf(json_file, "\t],\n");
     
     average /= pair_count;
     fprintf(stdout, "Expected average: %.18f\n", average);
+    
+    fprintf(json_file, "\t\"expected_average\": %.18f\n", average);
+    
+    fprintf(json_file, "}\n");
     
     if (answers_file)
     {
