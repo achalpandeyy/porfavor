@@ -58,7 +58,7 @@ static u64 ParseU64FromString(const char *st)
     u64 result = (u64)strtoull(st, &endptr, 10);
     if (endptr != st+strlen(st))
     {
-        fprintf(stdout, "ERROR: Invalid number\n");
+        fprintf(stderr, "ERROR: Invalid number\n");
         assert(false);
     }
     return result;

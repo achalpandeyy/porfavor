@@ -57,6 +57,14 @@ static b32 ParseJSONLine(char *ch, ParsedJSONLine *parsed_line)
     switch (*ch)
     {
         case '{':
+        case '\t':
+        case '"':
+        case ':':
+        case ' ':
+        case '[':
+        case ',':
+        case '}':
+        case ']':
         {
             ++ch;
             return ParseJSONLine(ch, parsed_line);
@@ -65,18 +73,6 @@ static b32 ParseJSONLine(char *ch, ParsedJSONLine *parsed_line)
         case '\n':
         {
             return 1;
-        } break;
-        
-        case '\t':
-        {
-            ++ch;
-            return ParseJSONLine(ch, parsed_line);
-        } break;
-        
-        case '"':
-        {
-            ++ch;
-            return ParseJSONLine(ch, parsed_line);
         } break;
         
         case 'p':
@@ -93,24 +89,6 @@ static b32 ParseJSONLine(char *ch, ParsedJSONLine *parsed_line)
                 assert(0);
                 return 0;
             }
-        } break;
-        
-        case ':':
-        {
-            ++ch;
-            return ParseJSONLine(ch, parsed_line);
-        } break;
-        
-        case ' ':
-        {
-            ++ch;
-            return ParseJSONLine(ch, parsed_line);
-        } break;
-        
-        case '[':
-        {
-            ++ch;
-            return ParseJSONLine(ch, parsed_line);
         } break;
         
         case 'x':
@@ -167,24 +145,6 @@ static b32 ParseJSONLine(char *ch, ParsedJSONLine *parsed_line)
                 assert(0);
                 return 0;
             }
-        } break;
-        
-        case ',':
-        {
-            ++ch;
-            return ParseJSONLine(ch, parsed_line);
-        } break;
-        
-        case '}':
-        {
-            ++ch;
-            return ParseJSONLine(ch, parsed_line);
-        } break;
-        
-        case ']':
-        {
-            ++ch;
-            return ParseJSONLine(ch, parsed_line);
         } break;
         
         case 'e':
@@ -270,11 +230,7 @@ int main(int argc, char **argv)
             if (IsPairComplete(&parsed_line))
             {
                 ++pair_count;
-#if 0
-                fprintf(stdout, "INFO: Pairs completed: %llu\n", pair_count);
-                if (pair_count == 100)
-                    __debugbreak();
-#endif
+                
                 f64 haversine_distance = ReferenceHaversine(parsed_line.x0, parsed_line.y0, parsed_line.x1, parsed_line.y1, g_EarthRadius);
                 average += haversine_distance;
                 
