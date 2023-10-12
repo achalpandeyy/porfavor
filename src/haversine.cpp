@@ -1,8 +1,13 @@
-#include "haversine_common.h"
-
-#include <float.h>
+// #define HAVERSINE_DEBUG
 
 typedef int b32;
+
+#define ArrayCount(arr) (sizeof(arr)/sizeof(arr[0]))
+
+#include "haversine_common.h"
+#include "haversine_profiler.h"
+
+#include <float.h>
 
 static b32 StringsEqual(char *non_null_terminated, char *null_terminated, u32 len)
 {
@@ -186,6 +191,49 @@ static b32 ParseJSONLine(char *ch, ParsedJSONLine *parsed_line)
         return 0;
     }
 }
+static inline f64 GetPercentage(u64 part, u64 whole)
+{
+    f64 result = ((f64)part*100.0)/(f64)whole;
+    return result;
+}
+
+static void NestedScopeTest()
+{
+    AUTOCLOSE_PROFILE_FUNCTION;
+    Sleep(250);
+    
+    {
+        AUTOCLOSE_PROFILE_SCOPE("Nested Scope 1");
+        Sleep(250);
+        
+        {
+            AUTOCLOSE_PROFILE_SCOPE("Nested Scope 2");
+            Sleep(250);
+            
+            {
+                AUTOCLOSE_PROFILE_SCOPE("Nested Scope 3");
+                Sleep(250);
+            }
+        }
+    }
+}
+
+static void MultipleHitCountTestHelper(u32 sleep_time)
+{
+    AUTOCLOSE_PROFILE_FUNCTION;
+    Sleep(sleep_time);
+}
+
+static void MultipleHitCountTest(u32 count)
+{
+    AUTOCLOSE_PROFILE_FUNCTION;
+    for (u32 i = 0; i < count; ++i)
+        MultipleHitCountTestHelper(1000/count);
+}
+
+static void RecursiveFunctionTest()
+{
+}
 
 int main(int argc, char **argv)
 {
@@ -194,6 +242,10 @@ int main(int argc, char **argv)
         fprintf(stderr, "Usage:\n\thaversine.exe [haversine_input.json]\n\thaversine.exe [haversine_input.json] [answers.f64]");
         return -1;
     }
+    
+    BeginProfiler();
+    // NestedScopeTest();
+    MultipleHitCountTest(20);
     
     char *input_path = argv[1];
     char *answers_path = 0;
@@ -206,69 +258,108 @@ int main(int argc, char **argv)
     if (answers_path)
         fprintf(stdout, "answers_path: %s\n", answers_path);
     
-    FILE *file = fopen(input_path, "r");
-    assert(file);
-    
+    FILE *file = 0;
     FILE *answers_file = 0;
-    if (answers_path)
     {
-        answers_file = fopen(answers_path, "rb");
-        assert(answers_file);
+        AUTOCLOSE_PROFILE_SCOPE("Read");
+        
+        file = fopen(input_path, "r");
+        assert(file);
+        
+        if (answers_path)
+        {
+            answers_file = fopen(answers_path, "rb");
+            assert(answers_file);
+        }
     }
     
     f64 average = 0.0;
     u64 pair_count = 0;
-    
     char line[1024];
     ParsedJSONLine parsed_line = { DBL_MAX, DBL_MAX, DBL_MAX, DBL_MAX, DBL_MAX };
     
-    while (fgets(line, sizeof(line), file))
     {
-        b32 success = ParseJSONLine(line, &parsed_line);
-        if (success)
+        AUTOCLOSE_PROFILE_SCOPE("Parse");
+        
+        while (fgets(line, sizeof(line), file))
         {
-            if (IsPairComplete(&parsed_line))
+            b32 success = ParseJSONLine(line, &parsed_line);
+            if (success)
             {
-                ++pair_count;
-                
-                f64 haversine_distance = ReferenceHaversine(parsed_line.x0, parsed_line.y0, parsed_line.x1, parsed_line.y1, g_EarthRadius);
-                average += haversine_distance;
-                
-                if (answers_file)
+                if (IsPairComplete(&parsed_line))
                 {
-                    f64 answer;
-                    u64 retval = fread(&answer, sizeof(f64), 1, answers_file);
-                    assert(retval == 1);
-                    assert(haversine_distance == answer);
+                    ++pair_count;
+                    
+                    f64 haversine_distance = ReferenceHaversine(parsed_line.x0, parsed_line.y0, parsed_line.x1, parsed_line.y1, g_EarthRadius);
+                    average += haversine_distance;
+                    
+                    if (answers_file)
+                    {
+                        f64 answer;
+                        u64 retval = fread(&answer, sizeof(f64), 1, answers_file);
+                        assert(retval == 1);
+                        assert(haversine_distance == answer);
+                    }
                 }
             }
+            else
+            {
+                fprintf(stderr, "ERROR: Failed to parse line: %s\n", line);
+            }
+            
+            memset(line, 0, sizeof(line));
+            
+            parsed_line.x0 = DBL_MAX;
+            parsed_line.y0 = DBL_MAX;
+            parsed_line.x1 = DBL_MAX;
+            parsed_line.y1 = DBL_MAX;
         }
-        else
-        {
-            fprintf(stderr, "ERROR: Failed to parse line: %s\n", line);
-        }
-        
-        memset(line, 0, sizeof(line));
-        
-        parsed_line.x0 = DBL_MAX;
-        parsed_line.y0 = DBL_MAX;
-        parsed_line.x1 = DBL_MAX;
-        parsed_line.y1 = DBL_MAX;
+        average /= pair_count;
     }
     
-    if (answers_file)
-        fclose(answers_file);
+    {
+        AUTOCLOSE_PROFILE_SCOPE("Cleanup");
+        
+        if (answers_file)
+            fclose(answers_file);
+        
+        fclose(file);
+    }
     
-    fclose(file);
+    {
+        AUTOCLOSE_PROFILE_SCOPE("Misc Output");
+        
+        fprintf(stdout, "\nPair count: %llu\n", pair_count);
+        fprintf(stdout, "Haversine average: %.18f\n", average);
+        
+        fprintf(stdout, "\nValidation:\n");
+        fprintf(stdout, "Reference average: %.18f\n", parsed_line.expected_average);
+        fprintf(stdout, "Difference: %.18f\n", fabs(parsed_line.expected_average - average));
+    }
     
-    average /= pair_count;
+    EndProfiler();
     
-    fprintf(stdout, "\nPair count: %llu\n", pair_count);
-    fprintf(stdout, "Haversine average: %.18f\n", average);
+    fprintf(stdout, "\nPerformance Profile:\n");
     
-    fprintf(stdout, "\nValidation:\n");
-    fprintf(stdout, "Reference average: %.18f\n", parsed_line.expected_average);
-    fprintf(stdout, "Difference: %.18f\n", fabs(parsed_line.expected_average - average));
+    u64 cpu_freq = EstimateCPUFrequency(10);
+    
+    u64 total_time = g_Profiler.tsc;
+    f64 total_ms = ((f64)total_time/(f64)cpu_freq)*1000.0;
+    
+    fprintf(stdout, "Total time: %.4fms (CPU Frequency Estimate: %llu)\n", total_ms, cpu_freq);
+    for (u32 i = 0; i < ArrayCount(g_Profiler.scopes); ++i)
+    {
+        ProfileScope *scope = g_Profiler.scopes + i;
+        if (!scope->label)
+            continue;
+        
+        u64 tsc_exclusive = scope->tsc_total - scope->tsc_children;
+        fprintf(stdout, "\t%s[%llu]: %llu (%.3f%%)", scope->label, scope->hit_count, tsc_exclusive, GetPercentage(tsc_exclusive, total_time));
+        if (scope->tsc_children)
+            fprintf(stdout, ", w/children: %llu (%.3f%%)", scope->tsc_total, GetPercentage(scope->tsc_total, total_time));
+        fprintf(stdout, "\n");
+    }
     
     return 0;
 }
+static_assert(ArrayCount(g_Profiler.scopes) >= __COUNTER__, "Ran out of `ProfileScope`s");

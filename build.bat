@@ -11,7 +11,7 @@ cl %COMPILER_FLAGS% /Od -Fe:porfavor ../src/main.c
 rem NOTE(achal): Part 2: The haversine stuff
 cl %COMPILER_FLAGS% -D_CRT_SECURE_NO_WARNINGS /O2 -Fe:haversine_generator ../src/haversine_generator.cpp
 cl %COMPILER_FLAGS% -D_CRT_SECURE_NO_WARNINGS /O2 -Fe:haversine ../src/haversine.cpp
-cl %COMPILER_FLAGS% -D_CRT_SECURE_NO_WARNINGS /O2 -Fe:estimate_processor_frequency_rdtsc ../src/estimate_processor_frequency_rdtsc.cpp
+cl %COMPILER_FLAGS% -D_CRT_SECURE_NO_WARNINGS /O2 -Fe:estimate_cpu_frequency_rdtsc ../src/estimate_cpu_frequency_rdtsc.cpp
 
 echo Build complete.
 

@@ -39,7 +39,7 @@ int main(int argc, char **argv)
     }
     else if (argc > 2)
     {
-        fprintf(stdout, "Usage: estimate_processor_frequency_rdtsc.exe [milliseconds]");
+        fprintf(stdout, "Usage: estimate_cpu_frequency_rdtsc.exe [milliseconds]");
         return -1;
     }
     
