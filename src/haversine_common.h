@@ -1,16 +1,15 @@
 #ifndef HAVERSINE_COMMON_H
 #define HAVERSINE_COMMON_H
 
+#include "porfavor_types.h"
+
+#define ArrayCount(arr) (sizeof(arr)/sizeof(arr[0]))
+
 #include <stdio.h>
-#include <stdint.h>
 #include <assert.h>
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
-
-typedef uint32_t u32;
-typedef uint64_t u64;
-typedef double f64;
 
 static f64 g_EarthRadius = 6372.8;
 

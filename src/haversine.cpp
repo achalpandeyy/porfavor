@@ -1,9 +1,3 @@
-// #define HAVERSINE_DEBUG
-
-typedef int b32;
-
-#define ArrayCount(arr) (sizeof(arr)/sizeof(arr[0]))
-
 #include "haversine_common.h"
 #include "haversine_profiler.h"
 
@@ -197,59 +191,7 @@ static inline f64 GetPercentage(u64 part, u64 whole)
     return result;
 }
 
-static void NestedScopeTest()
-{
-    PROFILE_FUNCTION;
-    Sleep(250);
-    
-    {
-        PROFILE_SCOPE("Nested Scope 1");
-        Sleep(250);
-        
-        {
-            PROFILE_SCOPE("Nested Scope 2");
-            Sleep(250);
-            
-            {
-                PROFILE_SCOPE("Nested Scope 3");
-                Sleep(250);
-            }
-        }
-    }
-}
 
-static void NestedScopeTest2()
-{
-    PROFILE_FUNCTION;
-    Sleep(500);
-    
-    {
-        PROFILE_SCOPE("Nested Scope 1");
-        Sleep(250);
-    }
-    
-    {
-        PROFILE_SCOPE("Nested Scope 2");
-        Sleep(250);
-    }
-}
-
-static void MultipleHitCountTestHelper(u32 sleep_time)
-{
-    PROFILE_FUNCTION;
-    Sleep(sleep_time);
-}
-
-static void MultipleHitCountTest(u32 count)
-{
-    PROFILE_FUNCTION;
-    for (u32 i = 0; i < count; ++i)
-        MultipleHitCountTestHelper(1000/count);
-}
-
-static void RecursiveFunctionTest()
-{
-}
 
 int main(int argc, char **argv)
 {
@@ -260,9 +202,6 @@ int main(int argc, char **argv)
     }
     
     BeginProfiler();
-    // NestedScopeTest();
-    // NestedScopeTest2();
-    // MultipleHitCountTest(2);
     
     char *input_path = argv[1];
     char *answers_path = 0;
@@ -371,7 +310,7 @@ int main(int argc, char **argv)
             continue;
         
         u64 elapsed_exclusive = anchor->elapsed_total - anchor->elapsed_children;
-        fprintf(stdout, "\t%s[%llu]: %llu (%.3f%%)", anchor->label, anchor->hit_count, elapsed_exclusive, GetPercentage(elapsed_exclusive, total_time));
+        fprintf(stdout, "\t%s[%u]: %llu (%.3f%%)", anchor->label, anchor->hit_count, elapsed_exclusive, GetPercentage(elapsed_exclusive, total_time));
         if (anchor->elapsed_children)
             fprintf(stdout, ", w/children: %llu (%.3f%%)", anchor->elapsed_total, GetPercentage(anchor->elapsed_total, total_time));
         fprintf(stdout, "\n");

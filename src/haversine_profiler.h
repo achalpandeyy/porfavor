@@ -47,20 +47,21 @@ static u64 EstimateCPUFrequency(u64 ms_to_wait)
     return result;
 }
 #else
-#error Only Windows supported now!
+#error Only Windows is supported now!
 #endif
 
 struct ProfileAnchor
 {
     u64 elapsed_total;
     u64 elapsed_children;
-    u64 hit_count;
+    u32 hit_count;
+    u32 recurse_count; // TODO(achal): We don't really need this
     char *label;
 };
 
 struct Profiler
 {
-    ProfileAnchor anchors[1+15];
+    ProfileAnchor anchors[1+31];
     u64 elapsed;
     u64 active_anchor_id;
 };
@@ -83,21 +84,32 @@ struct ProfileScope
         anchor = g_Profiler.anchors + id;
         parent_anchor = g_Profiler.anchors + g_Profiler.active_anchor_id;
         
-        ++anchor->hit_count;
-        anchor->label = label;
-        tsc_begin = __rdtsc();
+        if (anchor->recurse_count == 0)
+        {
+            if (anchor->hit_count == 0)
+                anchor->label = label;
+            
+            ++anchor->hit_count;
+            tsc_begin = __rdtsc();
+        }
         
+        ++anchor->recurse_count;
         g_Profiler.active_anchor_id = id;
     }
     
     ~ProfileScope()
     {
-        u64 elapsed = __rdtsc() - tsc_begin;
-        anchor->elapsed_total += elapsed;
+        --anchor->recurse_count;
         
-        b32 has_parent = (parent_anchor->label != 0);
-        if (has_parent)
-            parent_anchor->elapsed_children += elapsed;
+        if (anchor->recurse_count == 0)
+        {
+            u64 elapsed = __rdtsc() - tsc_begin;
+            anchor->elapsed_total += elapsed;
+            
+            b32 has_parent = (parent_anchor->label != 0);
+            if (has_parent)
+                parent_anchor->elapsed_children += elapsed;
+        }
         
         g_Profiler.active_anchor_id = parent_anchor-g_Profiler.anchors;
     }

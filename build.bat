@@ -13,6 +13,9 @@ cl %COMPILER_FLAGS% -D_CRT_SECURE_NO_WARNINGS /O2 -Fe:haversine_generator ../src
 cl %COMPILER_FLAGS% -D_CRT_SECURE_NO_WARNINGS /O2 -Fe:haversine ../src/haversine.cpp
 cl %COMPILER_FLAGS% -D_CRT_SECURE_NO_WARNINGS /O2 -Fe:estimate_cpu_frequency_rdtsc ../src/estimate_cpu_frequency_rdtsc.cpp
 
+rem NOTE(achal): Tests
+cl %COMPILER_FLAGS% /O2 ../src/test_haversine_profiler.cpp
+
 echo Build complete.
 
 popd
