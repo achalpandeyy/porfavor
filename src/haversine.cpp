@@ -199,19 +199,19 @@ static inline f64 GetPercentage(u64 part, u64 whole)
 
 static void NestedScopeTest()
 {
-    AUTOCLOSE_PROFILE_FUNCTION;
+    PROFILE_FUNCTION;
     Sleep(250);
     
     {
-        AUTOCLOSE_PROFILE_SCOPE(NestedScope1);
+        PROFILE_SCOPE("Nested Scope 1");
         Sleep(250);
         
         {
-            AUTOCLOSE_PROFILE_SCOPE(NestedScope2);
+            PROFILE_SCOPE("Nested Scope 2");
             Sleep(250);
             
             {
-                AUTOCLOSE_PROFILE_SCOPE(NestedScope3);
+                PROFILE_SCOPE("Nested Scope 3");
                 Sleep(250);
             }
         }
@@ -220,29 +220,29 @@ static void NestedScopeTest()
 
 static void NestedScopeTest2()
 {
-    AUTOCLOSE_PROFILE_FUNCTION;
+    PROFILE_FUNCTION;
     Sleep(500);
     
     {
-        AUTOCLOSE_PROFILE_SCOPE(NestedScope1);
+        PROFILE_SCOPE("Nested Scope 1");
         Sleep(250);
     }
     
     {
-        AUTOCLOSE_PROFILE_SCOPE(NestedScope2);
+        PROFILE_SCOPE("Nested Scope 2");
         Sleep(250);
     }
 }
 
 static void MultipleHitCountTestHelper(u32 sleep_time)
 {
-    AUTOCLOSE_PROFILE_FUNCTION;
+    PROFILE_FUNCTION;
     Sleep(sleep_time);
 }
 
 static void MultipleHitCountTest(u32 count)
 {
-    AUTOCLOSE_PROFILE_FUNCTION;
+    PROFILE_FUNCTION;
     for (u32 i = 0; i < count; ++i)
         MultipleHitCountTestHelper(1000/count);
 }
@@ -262,7 +262,7 @@ int main(int argc, char **argv)
     BeginProfiler();
     // NestedScopeTest();
     // NestedScopeTest2();
-    MultipleHitCountTest(2);
+    // MultipleHitCountTest(2);
     
     char *input_path = argv[1];
     char *answers_path = 0;
@@ -278,7 +278,7 @@ int main(int argc, char **argv)
     FILE *file = 0;
     FILE *answers_file = 0;
     {
-        AUTOCLOSE_PROFILE_SCOPE(Read);
+        PROFILE_SCOPE("Read");
         
         file = fopen(input_path, "r");
         assert(file);
@@ -296,7 +296,7 @@ int main(int argc, char **argv)
     ParsedJSONLine parsed_line = { DBL_MAX, DBL_MAX, DBL_MAX, DBL_MAX, DBL_MAX };
     
     {
-        AUTOCLOSE_PROFILE_SCOPE(Parse);
+        PROFILE_SCOPE("Parse");
         
         while (fgets(line, sizeof(line), file))
         {
@@ -335,7 +335,7 @@ int main(int argc, char **argv)
     }
     
     {
-        AUTOCLOSE_PROFILE_SCOPE(Cleanup);
+        PROFILE_SCOPE("Cleanup");
         
         if (answers_file)
             fclose(answers_file);
@@ -344,7 +344,7 @@ int main(int argc, char **argv)
     }
     
     {
-        AUTOCLOSE_PROFILE_SCOPE(MiscOutput);
+        PROFILE_SCOPE("Misc Output");
         
         fprintf(stdout, "\nPair count: %llu\n", pair_count);
         fprintf(stdout, "Haversine average: %.18f\n", average);
