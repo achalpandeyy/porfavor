@@ -50,96 +50,110 @@ static u64 EstimateCPUFrequency(u64 ms_to_wait)
 #error Only Windows supported now!
 #endif
 
-struct ProfileScope
+struct ProfileAnchor
 {
-    u64 tsc_begin;
-    u64 tsc_total;
-    u64 tsc_children;
-    char *label;
+    u64 elapsed_total;
+    u64 elapsed_children;
     u64 hit_count;
+    char *label;
     
 #ifdef HAVERSINE_DEBUG
     b32 closed;
 #endif
 };
 
-#define BEGIN_PROFILE_SCOPE_(label, id) BeginProfileScope(label, id)
-#define BEGIN_PROFILE_SCOPE(label) BEGIN_PROFILE_SCOPE_(label, __COUNTER__)
-// TODO(achal): Can I not make this take a label to construct the profile scope identifier???
-#define END_PROFILE_SCOPE(scope) EndProfileScope(scope)
-
-#define BEGIN_PROFILE_FUNCTION_(func_name) ProfileScope *_prof_func_##func_name = BEGIN_PROFILE_SCOPE(func_name)
-#define BEGIN_PROFILE_FUNCTION BEGIN_PROFILE_FUNCTION_(__func__)
-#define END_PROFILE_FUNCTION_(func_name) END_PROFILE_SCOPE(_prof_func_##func_name) 
-#define END_PROFILE_FUNCTION END_PROFILE_FUNCTION_(__func__)
-
 struct Profiler
 {
-    ProfileScope scopes[16];
-    u64 tsc;
-    u64 active_scope_id;
+    ProfileAnchor anchors[1+15];
+    u64 elapsed;
+    u64 active_anchor_id;
 };
 static Profiler g_Profiler;
 
-static inline void BeginProfiler() { g_Profiler.tsc = __rdtsc(); }
+static inline void BeginProfiler() { g_Profiler.elapsed = __rdtsc(); }
 static inline void EndProfiler()
 {
-    g_Profiler.tsc = __rdtsc() - g_Profiler.tsc;
-    
+    g_Profiler.elapsed = __rdtsc() - g_Profiler.elapsed;
 #ifdef HAVERSINE_DEBUG
-    for (ProfileScope *scope = g_Profiler.scopes; scope->label; ++scope)
+    for (u32 i = 0; i < ArrayCount(g_Profiler.anchors); ++i)
     {
-        if (!scope->closed)
-            fprintf(stderr, "ERROR: Profile scope was not closed: %s\n", scope->label); 
+        ProfileAnchor *anchor = g_Profiler.anchors + i;
+        if (!anchor->label)
+            continue;
+        
+        if (!anchor->closed)
+            fprintf(stdout, "ERROR: ProfileAnchor was not closed: %s\n", anchor->label);
     }
+    
 #endif
 }
 
-static inline ProfileScope * BeginProfileScope(char *label, u32 id)
+struct ProfileScope
 {
-    assert(id < ArrayCount(g_Profiler.scopes));
+    u64 tsc_begin;
+    ProfileAnchor *anchor;
+    ProfileAnchor *parent_anchor;
+};
+
+#define BEGIN_PROFILE_SCOPE_(label, id) ProfileScope _prof_scope_##label = BeginProfileScope(#label, id)
+#define BEGIN_PROFILE_SCOPE(label) BEGIN_PROFILE_SCOPE_(label, __COUNTER__+1)
+#define END_PROFILE_SCOPE(label) EndProfileScope(&_prof_scope_##label)
+
+#define BEGIN_PROFILE_FUNCTION_(label, id) ProfileScope _prof_scope_func = BeginProfileScope(label, id)
+#define BEGIN_PROFILE_FUNCTION BEGIN_PROFILE_FUNCTION_(__func__, __COUNTER__+1)
+#define END_PROFILE_FUNCTION EndProfileScope(&_prof_scope_func)
+
+static inline ProfileScope BeginProfileScope(char *label, u32 id)
+{
+    assert((id != 0) && "0 is reserved for the invalid anchor");
+    assert(id < ArrayCount(g_Profiler.anchors));
     
-    g_Profiler.active_scope_id = id;
+    ProfileAnchor *anchor = g_Profiler.anchors + id;
+    ++anchor->hit_count;
+    anchor->label = label;
+#ifdef HAVERSINE_DEBUG
+    anchor->closed = 0;
+#endif
     
-    ProfileScope *result = &g_Profiler.scopes[id];
-    result->tsc_begin = __rdtsc();
-    result->label = label;
-    ++result->hit_count;
+    ProfileScope result = { };
+    result.anchor = anchor;
+    result.parent_anchor = g_Profiler.anchors + g_Profiler.active_anchor_id;
+    result.tsc_begin = __rdtsc();
+    
+    g_Profiler.active_anchor_id = id;
     
     return result;
 }
 
 static inline void EndProfileScope(ProfileScope *scope)
 {
-    u64 scope_id = scope - g_Profiler.scopes;
-    if (g_Profiler.active_scope_id != scope_id)
-    {
-        assert(g_Profiler.active_scope_id < ArrayCount(g_Profiler.scopes));
-        
-        scope->tsc_children = g_Profiler.scopes[g_Profiler.active_scope_id].tsc_total;
-        g_Profiler.active_scope_id = scope_id;
-    }
+    u64 elapsed = __rdtsc() - scope->tsc_begin;
     
-    u64 tsc_elapsed = __rdtsc() - scope->tsc_begin;
-    scope->tsc_total += tsc_elapsed;
-    
+    ProfileAnchor *anchor = scope->anchor;
+    anchor->elapsed_total += elapsed;
 #ifdef HAVERSINE_DEBUG
-    scope->closed = 1;
+    anchor->closed = 1;
 #endif
+    
+    if (scope->parent_anchor->label)
+        scope->parent_anchor->elapsed_children += elapsed;
+    
+    g_Profiler.active_anchor_id = scope->parent_anchor-g_Profiler.anchors;
 }
 
 #ifdef __cplusplus
 struct AutocloseProfileScope
 {
-    ProfileScope *scope;
-    ~AutocloseProfileScope() { END_PROFILE_SCOPE(scope); }
+    ProfileScope scope;
+    AutocloseProfileScope(char *label, u32 id) { scope = BeginProfileScope(label, id); }
+    ~AutocloseProfileScope() { EndProfileScope(&scope); }
 };
-#define AUTOCLOSE_PROFILE_SCOPE__(label, id) AutocloseProfileScope _auto_prof_scope_##id = { BeginProfileScope(label, id) };
+#define AUTOCLOSE_PROFILE_SCOPE__(label, id) AutocloseProfileScope _auto_prof_scope_##label(#label, id)
 #define AUTOCLOSE_PROFILE_SCOPE_(label, id) AUTOCLOSE_PROFILE_SCOPE__(label, id)
-#define AUTOCLOSE_PROFILE_SCOPE(label) AUTOCLOSE_PROFILE_SCOPE_(label, __COUNTER__)
+#define AUTOCLOSE_PROFILE_SCOPE(label) AUTOCLOSE_PROFILE_SCOPE_(label, __COUNTER__+1)
 
-#define AUTOCLOSE_PROFILE_FUNCTION_(func_name) AUTOCLOSE_PROFILE_SCOPE(func_name) 
-#define AUTOCLOSE_PROFILE_FUNCTION AUTOCLOSE_PROFILE_FUNCTION_(__func__)
+#define AUTOCLOSE_PROFILE_FUNCTION_(func_name, id) AutocloseProfileScope _auto_prof_scope_func(func_name, id)
+#define AUTOCLOSE_PROFILE_FUNCTION AUTOCLOSE_PROFILE_FUNCTION_(__func__, __COUNTER__+1)
 #endif
 
 #endif //HAVERSINE_PROFILER_H

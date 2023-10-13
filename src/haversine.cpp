@@ -203,18 +203,34 @@ static void NestedScopeTest()
     Sleep(250);
     
     {
-        AUTOCLOSE_PROFILE_SCOPE("Nested Scope 1");
+        AUTOCLOSE_PROFILE_SCOPE(NestedScope1);
         Sleep(250);
         
         {
-            AUTOCLOSE_PROFILE_SCOPE("Nested Scope 2");
+            AUTOCLOSE_PROFILE_SCOPE(NestedScope2);
             Sleep(250);
             
             {
-                AUTOCLOSE_PROFILE_SCOPE("Nested Scope 3");
+                AUTOCLOSE_PROFILE_SCOPE(NestedScope3);
                 Sleep(250);
             }
         }
+    }
+}
+
+static void NestedScopeTest2()
+{
+    AUTOCLOSE_PROFILE_FUNCTION;
+    Sleep(500);
+    
+    {
+        AUTOCLOSE_PROFILE_SCOPE(NestedScope1);
+        Sleep(250);
+    }
+    
+    {
+        AUTOCLOSE_PROFILE_SCOPE(NestedScope2);
+        Sleep(250);
     }
 }
 
@@ -245,7 +261,8 @@ int main(int argc, char **argv)
     
     BeginProfiler();
     // NestedScopeTest();
-    MultipleHitCountTest(20);
+    // NestedScopeTest2();
+    MultipleHitCountTest(2);
     
     char *input_path = argv[1];
     char *answers_path = 0;
@@ -261,7 +278,7 @@ int main(int argc, char **argv)
     FILE *file = 0;
     FILE *answers_file = 0;
     {
-        AUTOCLOSE_PROFILE_SCOPE("Read");
+        AUTOCLOSE_PROFILE_SCOPE(Read);
         
         file = fopen(input_path, "r");
         assert(file);
@@ -279,7 +296,7 @@ int main(int argc, char **argv)
     ParsedJSONLine parsed_line = { DBL_MAX, DBL_MAX, DBL_MAX, DBL_MAX, DBL_MAX };
     
     {
-        AUTOCLOSE_PROFILE_SCOPE("Parse");
+        AUTOCLOSE_PROFILE_SCOPE(Parse);
         
         while (fgets(line, sizeof(line), file))
         {
@@ -318,7 +335,7 @@ int main(int argc, char **argv)
     }
     
     {
-        AUTOCLOSE_PROFILE_SCOPE("Cleanup");
+        AUTOCLOSE_PROFILE_SCOPE(Cleanup);
         
         if (answers_file)
             fclose(answers_file);
@@ -327,7 +344,7 @@ int main(int argc, char **argv)
     }
     
     {
-        AUTOCLOSE_PROFILE_SCOPE("Misc Output");
+        AUTOCLOSE_PROFILE_SCOPE(MiscOutput);
         
         fprintf(stdout, "\nPair count: %llu\n", pair_count);
         fprintf(stdout, "Haversine average: %.18f\n", average);
@@ -343,23 +360,23 @@ int main(int argc, char **argv)
     
     u64 cpu_freq = EstimateCPUFrequency(10);
     
-    u64 total_time = g_Profiler.tsc;
+    u64 total_time = g_Profiler.elapsed;
     f64 total_ms = ((f64)total_time/(f64)cpu_freq)*1000.0;
     
     fprintf(stdout, "Total time: %.4fms (CPU Frequency Estimate: %llu)\n", total_ms, cpu_freq);
-    for (u32 i = 0; i < ArrayCount(g_Profiler.scopes); ++i)
+    for (u32 i = 0; i < ArrayCount(g_Profiler.anchors); ++i)
     {
-        ProfileScope *scope = g_Profiler.scopes + i;
-        if (!scope->label)
+        ProfileAnchor *anchor = g_Profiler.anchors + i;
+        if (!anchor->label)
             continue;
         
-        u64 tsc_exclusive = scope->tsc_total - scope->tsc_children;
-        fprintf(stdout, "\t%s[%llu]: %llu (%.3f%%)", scope->label, scope->hit_count, tsc_exclusive, GetPercentage(tsc_exclusive, total_time));
-        if (scope->tsc_children)
-            fprintf(stdout, ", w/children: %llu (%.3f%%)", scope->tsc_total, GetPercentage(scope->tsc_total, total_time));
+        u64 elapsed_exclusive = anchor->elapsed_total - anchor->elapsed_children;
+        fprintf(stdout, "\t%s[%llu]: %llu (%.3f%%)", anchor->label, anchor->hit_count, elapsed_exclusive, GetPercentage(elapsed_exclusive, total_time));
+        if (anchor->elapsed_children)
+            fprintf(stdout, ", w/children: %llu (%.3f%%)", anchor->elapsed_total, GetPercentage(anchor->elapsed_total, total_time));
         fprintf(stdout, "\n");
     }
     
     return 0;
 }
-static_assert(ArrayCount(g_Profiler.scopes) >= __COUNTER__, "Ran out of `ProfileScope`s");
+static_assert(ArrayCount(g_Profiler.anchors) >= __COUNTER__+1, "Ran out of `ProfileAnchor`s");
