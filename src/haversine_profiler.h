@@ -55,7 +55,7 @@ struct ProfileAnchor
     u64 elapsed_total;
     u64 elapsed_children;
     u32 hit_count;
-    u32 recurse_count; // TODO(achal): We don't really need this
+    u32 recurse_count; // TODO(achal): Do we really need this?
     char *label;
 };
 
