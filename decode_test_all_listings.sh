@@ -4,7 +4,6 @@
 # It will not show you any specific errors. For that run the test_listing.sh or
 # test_listing.bat with the listing you want.
 
-# TODO(achal): I'll probably get this automatically in the future.
 assembled_listings=(
     "listing_0037_single_register_mov"
     "listing_0038_many_register_mov"
