@@ -1,4 +1,10 @@
 #include "haversine_common.h"
+// TODO(achal): This is weird: when I enable my profiler I get 18374.7401ms for the entire program
+// and when I disable it I get 19871.9035ms. Why it is taking 1.5s more to do LESS work?!
+
+// Check again, what all stuff Casey disables when the profiler is not active.
+
+// #define ENABLE_PROFILER
 #include "haversine_profiler.h"
 
 #include <float.h>
@@ -185,13 +191,6 @@ static b32 ParseJSONLine(char *ch, ParsedJSONLine *parsed_line)
         return 0;
     }
 }
-static inline f64 GetPercentage(u64 part, u64 whole)
-{
-    f64 result = ((f64)part*100.0)/(f64)whole;
-    return result;
-}
-
-
 
 int main(int argc, char **argv)
 {
@@ -298,23 +297,12 @@ int main(int argc, char **argv)
     fprintf(stdout, "\nPerformance Profile:\n");
     
     u64 cpu_freq = EstimateCPUFrequency(10);
-    
     u64 total_time = g_Profiler.elapsed;
     f64 total_ms = ((f64)total_time/(f64)cpu_freq)*1000.0;
     
-    fprintf(stdout, "Total time: %.4fms (CPU Frequency Estimate: %llu)\n", total_ms, cpu_freq);
-    for (u32 i = 0; i < ArrayCount(g_Profiler.anchors); ++i)
-    {
-        ProfileAnchor *anchor = g_Profiler.anchors + i;
-        if (!anchor->label)
-            continue;
-        
-        fprintf(stdout, "\t%s[%llu]: %llu (%.3f%%)", anchor->label, anchor->hit_count, anchor->elapsed_exclusive, GetPercentage(anchor->elapsed_exclusive, total_time));
-        if (anchor->elapsed_exclusive != anchor->elapsed_inclusive)
-            fprintf(stdout, ", w/children: %llu (%.3f%%)", anchor->elapsed_inclusive, GetPercentage(anchor->elapsed_inclusive, total_time));
-        fprintf(stdout, "\n");
-    }
+    fprintf(stdout, "Total time: %llu | %.4fms (CPU Frequency Estimate: %llu)\n", total_time, total_ms, cpu_freq);
+    PrintPerformanceProfile();
     
     return 0;
 }
-static_assert(ArrayCount(g_Profiler.anchors) >= __COUNTER__+1, "Ran out of `ProfileAnchor`s");
+PROFILER_END_OF_COMPILATION_UNIT;

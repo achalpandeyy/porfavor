@@ -1,6 +1,7 @@
 #include "porfavor_types.h"
 
 #include "haversine_common.h"
+#define ENABLE_PROFILER
 #include "haversine_profiler.h"
 
 static void Test0_NestedScopes()

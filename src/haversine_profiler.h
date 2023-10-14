@@ -60,15 +60,19 @@ struct ProfileAnchor
 
 struct Profiler
 {
-    ProfileAnchor anchors[1+31];
     u64 elapsed;
+    
+#ifdef ENABLE_PROFILER
     u32 active_anchor_id;
+    ProfileAnchor anchors[1+31];
+#endif
 };
 static Profiler g_Profiler;
 
 static inline void BeginProfiler() { g_Profiler.elapsed = __rdtsc(); }
 static inline void EndProfiler() { g_Profiler.elapsed = __rdtsc() - g_Profiler.elapsed; }
 
+#ifdef ENABLE_PROFILER
 struct ProfileScope
 {
     u64 tsc_begin;
@@ -113,9 +117,43 @@ struct ProfileScope
     }
 };
 
+static inline f64 GetPercentage(u64 part, u64 whole)
+{
+    f64 result = ((f64)part*100.0)/(f64)whole;
+    return result;
+}
+
+static void PrintPerformanceProfile()
+{
+    u64 total_time = g_Profiler.elapsed;
+    
+    for (u32 i = 0; i < ArrayCount(g_Profiler.anchors); ++i)
+    {
+        ProfileAnchor *anchor = g_Profiler.anchors + i;
+        if (!anchor->label)
+            continue;
+        
+        fprintf(stdout, "\t%s[%llu]: %llu (%.3f%%)", anchor->label, anchor->hit_count, anchor->elapsed_exclusive, GetPercentage(anchor->elapsed_exclusive, total_time));
+        if (anchor->elapsed_exclusive != anchor->elapsed_inclusive)
+            fprintf(stdout, ", w/children: %llu (%.3f%%)", anchor->elapsed_inclusive, GetPercentage(anchor->elapsed_inclusive, total_time));
+        fprintf(stdout, "\n");
+    }
+}
+
 #define CONCAT_IMPL(a, b) a##b
 #define CONCAT(a, b) CONCAT_IMPL(a, b)
 #define PROFILE_SCOPE(label) ProfileScope CONCAT(_prof_scope_, __LINE__)(label, __COUNTER__+1)
 #define PROFILE_FUNCTION PROFILE_SCOPE(__func__)
 
-#endif //HAVERSINE_PROFILER_H
+#define PROFILER_END_OF_COMPILATION_UNIT static_assert(ArrayCount(g_Profiler.anchors) >= __COUNTER__+1, "Ran out of `ProfileAnchor`s")
+#else
+
+#define PROFILE_SCOPE
+#define PROFILE_FUNCTION
+
+#define PrintPerformanceProfile(...)
+
+#define PROFILER_END_OF_COMPILATION_UNIT
+#endif // ENABLE_PROFILER
+
+#endif // HAVERSINE_PROFILER_H
