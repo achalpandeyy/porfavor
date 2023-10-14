@@ -309,10 +309,9 @@ int main(int argc, char **argv)
         if (!anchor->label)
             continue;
         
-        u64 elapsed_exclusive = anchor->elapsed_total - anchor->elapsed_children;
-        fprintf(stdout, "\t%s[%u]: %llu (%.3f%%)", anchor->label, anchor->hit_count, elapsed_exclusive, GetPercentage(elapsed_exclusive, total_time));
-        if (anchor->elapsed_children)
-            fprintf(stdout, ", w/children: %llu (%.3f%%)", anchor->elapsed_total, GetPercentage(anchor->elapsed_total, total_time));
+        fprintf(stdout, "\t%s[%llu]: %llu (%.3f%%)", anchor->label, anchor->hit_count, anchor->elapsed_exclusive, GetPercentage(anchor->elapsed_exclusive, total_time));
+        if (anchor->elapsed_exclusive != anchor->elapsed_inclusive)
+            fprintf(stdout, ", w/children: %llu (%.3f%%)", anchor->elapsed_inclusive, GetPercentage(anchor->elapsed_inclusive, total_time));
         fprintf(stdout, "\n");
     }
     

@@ -52,10 +52,9 @@ static u64 EstimateCPUFrequency(u64 ms_to_wait)
 
 struct ProfileAnchor
 {
-    u64 elapsed_total;
-    u64 elapsed_children;
-    u32 hit_count;
-    u32 recurse_count; // TODO(achal): Do we really need this?
+    u64 elapsed_inclusive;
+    u64 elapsed_exclusive;
+    u64 hit_count;
     char *label;
 };
 
@@ -63,7 +62,7 @@ struct Profiler
 {
     ProfileAnchor anchors[1+31];
     u64 elapsed;
-    u64 active_anchor_id;
+    u32 active_anchor_id;
 };
 static Profiler g_Profiler;
 
@@ -73,45 +72,44 @@ static inline void EndProfiler() { g_Profiler.elapsed = __rdtsc() - g_Profiler.e
 struct ProfileScope
 {
     u64 tsc_begin;
-    ProfileAnchor *anchor;
-    ProfileAnchor *parent_anchor;
+    u32 anchor_id;
+    u32 parent_anchor_id;
+    char *label;
+    u64 old_elapsed_inclusive;
     
-    ProfileScope(char *label, u32 id)
+    ProfileScope(char *label_, u32 id)
     {
         assert((id != 0) && "0 is reserved for the invalid anchor");
         assert(id < ArrayCount(g_Profiler.anchors));
         
-        anchor = g_Profiler.anchors + id;
-        parent_anchor = g_Profiler.anchors + g_Profiler.active_anchor_id;
+        anchor_id = id;
+        parent_anchor_id = g_Profiler.active_anchor_id;
+        label = label_;
         
-        if (anchor->recurse_count == 0)
-        {
-            if (anchor->hit_count == 0)
-                anchor->label = label;
-            
-            ++anchor->hit_count;
-            tsc_begin = __rdtsc();
-        }
+        ProfileAnchor *anchor = g_Profiler.anchors + anchor_id;
+        old_elapsed_inclusive = anchor->elapsed_inclusive;
         
-        ++anchor->recurse_count;
         g_Profiler.active_anchor_id = id;
+        
+        tsc_begin = __rdtsc();
     }
     
     ~ProfileScope()
     {
-        --anchor->recurse_count;
+        u64 elapsed = __rdtsc() - tsc_begin;
         
-        if (anchor->recurse_count == 0)
-        {
-            u64 elapsed = __rdtsc() - tsc_begin;
-            anchor->elapsed_total += elapsed;
-            
-            b32 has_parent = (parent_anchor->label != 0);
-            if (has_parent)
-                parent_anchor->elapsed_children += elapsed;
-        }
+        ProfileAnchor *anchor = g_Profiler.anchors + anchor_id;
+        ProfileAnchor *parent_anchor = g_Profiler.anchors + parent_anchor_id;
         
-        g_Profiler.active_anchor_id = parent_anchor-g_Profiler.anchors;
+        if (anchor->hit_count == 0)
+            anchor->label = label;
+        
+        ++anchor->hit_count;
+        anchor->elapsed_inclusive = old_elapsed_inclusive + elapsed;
+        anchor->elapsed_exclusive += elapsed;
+        parent_anchor->elapsed_exclusive -= elapsed;
+        
+        g_Profiler.active_anchor_id = parent_anchor_id;
     }
 };
 
