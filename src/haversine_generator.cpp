@@ -99,7 +99,7 @@ int main(int argc, char **argv)
                 
                 average += haversine_distance;
                 
-                fprintf(json_file, "\t\t{\"x0\": %.18f, \"y0\": %.18f, \"x1\": %.18f, \"y1\": %.18f}", x0, y0, x1, y1);
+                fprintf(json_file, "\t\t{\"x0\": %.15f, \"y0\": %.15f, \"x1\": %.15f, \"y1\": %.15f}", x0, y0, x1, y1);
                 
                 pairs_picked++;
                 assert(pairs_picked <= pair_count);
@@ -119,15 +119,15 @@ int main(int argc, char **argv)
     fprintf(json_file, "\t],\n");
     
     average /= pair_count;
-    fprintf(stdout, "Expected average: %.18f\n", average);
+    fprintf(stdout, "Expected average: %.15f\n", average);
     
-    fprintf(json_file, "\t\"expected_average\": %.18f\n", average);
+    fprintf(json_file, "\t\"expected_average\": %.15f\n", average);
     
     fprintf(json_file, "}\n");
     
     if (answers_file)
     {
-        fprintf(stdout, "INFO: Successfully written the haversine answeres binary data file\n");
+        fprintf(stdout, "INFO: Successfully written the haversine answers binary data file\n");
         fclose(answers_file);
     }
     

@@ -6,6 +6,10 @@ tests/
 *.asm
 *.sln
 *.txt
+*.json
+*.f64
+
+memory_dump.data
 
 listing_*
 out_listing_*

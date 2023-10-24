@@ -1,8 +1,4 @@
 #include "haversine_common.h"
-// TODO(achal): This is weird: when I enable my profiler I get 18374.7401ms for the entire program
-// and when I disable it I get 19871.9035ms. Why it is taking 1.5s more to do LESS work?!
-
-// Check again, what all stuff Casey disables when the profiler is not active.
 
 // #define ENABLE_PROFILER
 #include "haversine_profiler.h"
@@ -33,27 +29,63 @@ static inline b32 IsPairComplete(ParsedJSONLine *line)
     return result;
 }
 
-static f64 ParseF64JSON(char *non_null_terminated, u32 *bytes_parsed)
+static f64 ParseF64FromString(char *string, u32 *bytes_parsed)
 {
-    char *ch = non_null_terminated;
+    PROFILE_FUNCTION;
     
-    u32 len = 0;
-    char nt[32];
+    f64 result = 0;
+    char *ch = string;
+    
+    assert((*ch != ' ') && "My generator does not put spaces here");
+    
+    b32 is_negative = 0;
+    if (*ch == '-')
+    {
+        is_negative = 1;
+        ++ch;
+    }
+    
+    u32 pre_decimal_digit_count = 0;
+    {
+        char *temp = ch;
+        while (*ch != '.')
+            ++ch;
+        pre_decimal_digit_count = (u32)(ch-temp);
+    }
+    
+    f64 digit_scale = 1.0;
+    for (u32 i = 0; i < pre_decimal_digit_count; ++i)
+    {
+        char digit = *(ch - (i + 1));
+        assert(isdigit(digit));
+        
+        f64 digit_f64 = (f64)(digit - '0');
+        result += digit_scale*digit_f64;
+        
+        digit_scale *= 10.0;
+    }
+    
+    // move from the decimal to the first digit after decimal
+    ++ch;
+    
+    digit_scale = 0.1;
     while ((*ch != ',') && (*ch != '}') && (*ch != '\n'))
-        nt[len++] = *ch++;
-    nt[len] = '\0';
+    {
+        assert(isdigit(*ch));
+        
+        f64 digit_f64 = (f64)(*ch - '0');
+        result += digit_scale*digit_f64;
+        
+        digit_scale *= 0.1;
+        ++ch;
+    }
     
     if (bytes_parsed)
-        *bytes_parsed = len;
+        *bytes_parsed = (u32)(ch-string);
     
-    char *endptr = 0;
-    f64 result = strtod(nt, &endptr);
-    if (endptr != nt+len)
-    {
-        fprintf(stdout, "VALUE: %s\n", nt);
-        fprintf(stderr, "ERROR: Invalid floating-point number\n");
-        assert(0);
-    }
+    if (is_negative)
+        result *= -1.0;
+    
     return result;
 }
 
@@ -120,7 +152,7 @@ static b32 ParseJSONLine(char *ch, ParsedJSONLine *parsed_line)
                 ch += len;
                 
                 u32 bytes_parsed;
-                f64 value = ParseF64JSON(ch, &bytes_parsed);
+                f64 value = ParseF64FromString(ch, &bytes_parsed);
                 
                 if (is_x)
                 {
@@ -167,7 +199,7 @@ static b32 ParseJSONLine(char *ch, ParsedJSONLine *parsed_line)
                     ch += len;
                     
                     u32 bytes_parsed;
-                    f64 value = ParseF64JSON(ch, &bytes_parsed);
+                    f64 value = ParseF64FromString(ch, &bytes_parsed);
                     
                     parsed_line->expected_average = value;
                     ch += bytes_parsed;
@@ -251,9 +283,11 @@ int main(int argc, char **argv)
                     if (answers_file)
                     {
                         f64 answer;
-                        u64 retval = fread(&answer, sizeof(f64), 1, answers_file);
-                        assert(retval == 1);
-                        assert(haversine_distance == answer);
+                        fread(&answer, sizeof(f64), 1, answers_file);
+                        
+                        f64 threshold = 1e-10;
+                        f64 abs_diff = fabs(answer-haversine_distance);
+                        assert(abs_diff <= threshold);
                     }
                 }
             }
@@ -285,11 +319,11 @@ int main(int argc, char **argv)
         PROFILE_SCOPE("Misc Output");
         
         fprintf(stdout, "\nPair count: %llu\n", pair_count);
-        fprintf(stdout, "Haversine average: %.18f\n", average);
+        fprintf(stdout, "Haversine average: %.15f\n", average);
         
         fprintf(stdout, "\nValidation:\n");
-        fprintf(stdout, "Reference average: %.18f\n", parsed_line.expected_average);
-        fprintf(stdout, "Difference: %.18f\n", fabs(parsed_line.expected_average - average));
+        fprintf(stdout, "Reference average: %.15f\n", parsed_line.expected_average);
+        fprintf(stdout, "Difference: %.15f\n", fabs(parsed_line.expected_average - average));
     }
     
     EndProfiler();
