@@ -1,6 +1,10 @@
 #ifndef HAVERSINE_PROFILER_H
 #define HAVERSINE_PROFILER_H
 
+#ifndef READ_SCOPE_TIMER
+#define READ_SCOPE_TIMER ReadCPUTimer
+#endif
+
 #ifdef _WIN32
 #include <intrin.h>
 #define WIN32_LEAN_AND_MEAN
@@ -15,7 +19,7 @@ static inline u64 GetOSTimerFrequency()
     return result;
 }
 
-static inline u64 GetOSTimer()
+static inline u64 ReadOSTimer()
 {
     LARGE_INTEGER large_int;
     BOOL retval = QueryPerformanceCounter(&large_int);
@@ -24,27 +28,31 @@ static inline u64 GetOSTimer()
     return result;
 }
 
-static u64 EstimateCPUFrequency(u64 ms_to_wait)
+inline static u64 ReadCPUTimer()
+{
+    return __rdtsc();
+}
+
+static u64 EstimateScopeTimerFrequency(u64 ms_to_wait)
 {
     u64 os_timer_freq = GetOSTimerFrequency();
     u64 os_wait_time = (os_timer_freq*ms_to_wait)/1000;
     
-    u64 os_timer_begin = GetOSTimer();
     u64 os_timer_elapsed = 0;
+    u64 os_timer_begin = ReadOSTimer();
     
-    u64 cpu_timer_begin = __rdtsc();
+    u64 scope_timer_begin = READ_SCOPE_TIMER();
     while (os_timer_elapsed < os_wait_time)
     {
-        u64 os_timer_end = GetOSTimer();
+        u64 os_timer_end = ReadOSTimer();
         os_timer_elapsed = os_timer_end - os_timer_begin;
     }
-    u64 cpu_timer_end = __rdtsc();
+    u64 scope_timer_end = READ_SCOPE_TIMER();
     
-    u64 cpu_timer_elapsed = cpu_timer_end - cpu_timer_begin;
-    u64 cpu_timer_freq = os_timer_freq*cpu_timer_elapsed/(os_timer_elapsed);
+    u64 scope_timer_elapsed = scope_timer_end - scope_timer_begin;
+    u64 scope_timer_freq = (os_timer_freq*scope_timer_elapsed)/os_timer_elapsed;
     
-    u64 result = cpu_timer_freq;
-    return result;
+    return scope_timer_freq;
 }
 #else
 #error Only Windows is supported now!
@@ -69,8 +77,8 @@ struct Profiler
 };
 static Profiler g_Profiler;
 
-static inline void BeginProfiler() { g_Profiler.elapsed = __rdtsc(); }
-static inline void EndProfiler() { g_Profiler.elapsed = __rdtsc() - g_Profiler.elapsed; }
+static inline void BeginProfiler() { g_Profiler.elapsed = READ_SCOPE_TIMER(); }
+static inline void EndProfiler() { g_Profiler.elapsed = READ_SCOPE_TIMER() - g_Profiler.elapsed; }
 
 #ifdef ENABLE_PROFILER
 struct ProfileScope
@@ -95,12 +103,12 @@ struct ProfileScope
         
         g_Profiler.active_anchor_id = id;
         
-        tsc_begin = __rdtsc();
+        tsc_begin = READ_SCOPE_TIMER();
     }
     
     ~ProfileScope()
     {
-        u64 elapsed = __rdtsc() - tsc_begin;
+        u64 elapsed = READ_SCOPE_TIMER() - tsc_begin;
         
         ProfileAnchor *anchor = g_Profiler.anchors + anchor_id;
         ProfileAnchor *parent_anchor = g_Profiler.anchors + parent_anchor_id;

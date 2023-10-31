@@ -51,6 +51,7 @@ static f64 ReferenceHaversine(f64 X0, f64 Y0, f64 X1, f64 Y1, f64 EarthRadius)
     return Result;
 }
 
+// NOTE(achal): Since we are using a CRT function here it most likely assumes a null-terminated string.
 static u64 ParseU64FromString(const char *st)
 {
     char *endptr = 0;

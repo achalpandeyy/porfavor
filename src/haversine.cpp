@@ -1,9 +1,12 @@
 #include "haversine_common.h"
 
-// #define ENABLE_PROFILER
+// #define READ_SCOPE_TIMER ReadOSTimer
+// #define ENABLE_PROFILER 1
 #include "haversine_profiler.h"
 
 #include <float.h>
+#include <sys/types.h>
+#include <sys/stat.h>
 
 static b32 StringsEqual(char *non_null_terminated, char *null_terminated, u32 len)
 {
@@ -23,6 +26,12 @@ struct ParsedJSONLine
     f64 expected_average;
 };
 
+struct HaversinePair
+{
+    f64 x0, y0;
+    f64 x1, y1;
+};
+
 static inline b32 IsPairComplete(ParsedJSONLine *line)
 {
     b32 result = (line->x0 != DBL_MAX) && (line->y0 != DBL_MAX) && (line->x1 != DBL_MAX) && (line->y1 != DBL_MAX);
@@ -31,7 +40,7 @@ static inline b32 IsPairComplete(ParsedJSONLine *line)
 
 static f64 ParseF64FromString(char *string, u32 *bytes_parsed)
 {
-    PROFILE_FUNCTION;
+    // PROFILE_FUNCTION;
     
     f64 result = 0;
     char *ch = string;
@@ -224,13 +233,40 @@ static b32 ParseJSONLine(char *ch, ParsedJSONLine *parsed_line)
     }
 }
 
+// TODO(achal): This facilitates an incorrect way of parsing JSON and I will get rid of this
+// in the future when I introduce lexing-based parsing.
+// NOTE(achal): Reads until a newline character is encountered.
+static u64 ReadLine(char *line, u32 max_line_size, u8 *json_data)
+{
+    u32 char_count = 0;
+    u8 *src = json_data;
+    while (*src != '\n')
+    {
+        *line++ = *src++;
+        ++char_count;
+    }
+    
+    // NOTE(achal): We still have to read the newline char at the end.
+    *line++ = *src++;
+    ++char_count;
+    
+    assert(char_count <= max_line_size);
+    return char_count;
+}
+
 int main(int argc, char **argv)
 {
     if (argc < 2 || argc > 3)
     {
-        fprintf(stderr, "Usage:\n\thaversine.exe [haversine_input.json]\n\thaversine.exe [haversine_input.json] [answers.f64]");
+        fprintf(stderr, "Usage:\n\thaversine.exe [haversine_input_<pair_count>.json]\n\thaversine.exe [haversine_input_<pair_count>.json] [haversine_answers_<pair_count>.f64]");
         return -1;
     }
+    
+#if ENABLE_PROFILER
+    printf("Profiler: Enabled\n");
+#else
+    printf("Profiler: Disabled\n");
+#endif
     
     BeginProfiler();
     
@@ -241,60 +277,84 @@ int main(int argc, char **argv)
     
     assert(input_path);
     
+    u64 pair_count = 0;
+    {
+        u64 input_path_len = strlen(input_path);
+        
+        char input_path_prefix[] = "haversine_input_";
+        u64 input_path_prefix_len = strlen(input_path_prefix);
+        assert(input_path_len >= input_path_prefix_len);
+        
+        char *pair_count_str_begin = input_path + input_path_prefix_len;
+        char *pair_count_str_end = strchr(pair_count_str_begin, '.');
+        assert(pair_count_str_end);
+        
+        u64 len = pair_count_str_end-pair_count_str_begin;
+        char temp[32];
+        memcpy(temp, pair_count_str_begin, len);
+        temp[len] = '\0';
+        pair_count = ParseU64FromString(temp);
+    }
+    assert(pair_count != 0);
+    printf("Pair Count: %llu\n", pair_count);
+    
     fprintf(stdout, "input_path: %s\n", input_path);
     if (answers_path)
         fprintf(stdout, "answers_path: %s\n", answers_path);
     
-    FILE *file = 0;
-    FILE *answers_file = 0;
+    u8 *json_data = 0;
+    u64 json_char_count = 0;
     {
-        PROFILE_SCOPE("Read");
+        // PROFILE_SCOPE("Read");
         
-        file = fopen(input_path, "r");
+        FILE *file = fopen(input_path, "r");
         assert(file);
         
-        if (answers_path)
+        struct __stat64 stat;
         {
-            answers_file = fopen(answers_path, "rb");
-            assert(answers_file);
+            int retval = _stat64(input_path, &stat);
+            assert(retval == 0);
         }
+        
+        json_data = (u8 *)malloc(stat.st_size);
+        assert(json_data);
+        
+        json_char_count = fread(json_data, 1, stat.st_size, file);
+        fclose(file);
+        assert(json_char_count <= (size_t)stat.st_size);
     }
     
-    f64 average = 0.0;
-    u64 pair_count = 0;
+    HaversinePair *haversine_pairs = (HaversinePair *)malloc(pair_count*sizeof(HaversinePair));
+    assert(haversine_pairs);
+    
     char line[1024];
     ParsedJSONLine parsed_line = { DBL_MAX, DBL_MAX, DBL_MAX, DBL_MAX, DBL_MAX };
     
+    u64 parsed_pair_count = 0;
     {
-        PROFILE_SCOPE("Parse");
+        // PROFILE_SCOPE("Parse");
         
-        while (fgets(line, sizeof(line), file))
+        memset(line, 0, sizeof(line));
+        u64 total_parsed_char_count = 0;
+        while (total_parsed_char_count < json_char_count)
         {
+            u64 parsed_char_count = ReadLine(line, sizeof(line), json_data+total_parsed_char_count);
             b32 success = ParseJSONLine(line, &parsed_line);
+#if 1
             if (success)
             {
                 if (IsPairComplete(&parsed_line))
                 {
-                    ++pair_count;
-                    
-                    f64 haversine_distance = ReferenceHaversine(parsed_line.x0, parsed_line.y0, parsed_line.x1, parsed_line.y1, g_EarthRadius);
-                    average += haversine_distance;
-                    
-                    if (answers_file)
-                    {
-                        f64 answer;
-                        fread(&answer, sizeof(f64), 1, answers_file);
-                        
-                        f64 threshold = 1e-10;
-                        f64 abs_diff = fabs(answer-haversine_distance);
-                        assert(abs_diff <= threshold);
-                    }
+                    haversine_pairs[parsed_pair_count++] = {parsed_line.x0, parsed_line.y0, parsed_line.x1, parsed_line.y1};
                 }
             }
             else
             {
                 fprintf(stderr, "ERROR: Failed to parse line: %s\n", line);
             }
+#endif
+            
+            total_parsed_char_count += parsed_char_count;
             
             memset(line, 0, sizeof(line));
             
@@ -303,22 +363,55 @@ int main(int argc, char **argv)
             parsed_line.x1 = DBL_MAX;
             parsed_line.y1 = DBL_MAX;
         }
-        average /= pair_count;
+    }
+    assert(parsed_pair_count == pair_count);
+    
+    FILE *answers_file = 0;
+    if (answers_path)
+    {
+        answers_file = fopen(answers_path, "rb");
+        assert(answers_file);
     }
     
+    f64 average = 0.0;
+#if 1
     {
-        PROFILE_SCOPE("Cleanup");
+        // PROFILE_SCOPE("Sum Haversine Pairs");
+        
+        for (u64 i = 0; i < pair_count; ++i)
+        {
+            HaversinePair *pair = haversine_pairs + i;
+            
+            f64 haversine_distance = ReferenceHaversine(pair->x0, pair->y0, pair->x1, pair->y1, g_EarthRadius);
+            average += haversine_distance;
+            
+            if (answers_file)
+            {
+                f64 answer;
+                fread(&answer, sizeof(f64), 1, answers_file);
+                
+                f64 threshold = 1e-10;
+                f64 abs_diff = fabs(answer-haversine_distance);
+                assert(abs_diff <= threshold);
+            }
+        }
+    }
+#endif
+    average /= pair_count;
+    
+    {
+        // PROFILE_SCOPE("Cleanup");
         
         if (answers_file)
             fclose(answers_file);
         
-        fclose(file);
+        free(haversine_pairs);
+        free(json_data);
     }
     
     {
-        PROFILE_SCOPE("Misc Output");
+        // PROFILE_SCOPE("Misc Output");
         
-        fprintf(stdout, "\nPair count: %llu\n", pair_count);
         fprintf(stdout, "Haversine average: %.15f\n", average);
         
         fprintf(stdout, "\nValidation:\n");
@@ -330,7 +423,7 @@ int main(int argc, char **argv)
     
     fprintf(stdout, "\nPerformance Profile:\n");
     
-    u64 cpu_freq = EstimateCPUFrequency(10);
+    u64 cpu_freq = EstimateScopeTimerFrequency(100);
     u64 total_time = g_Profiler.elapsed;
     f64 total_ms = ((f64)total_time/(f64)cpu_freq)*1000.0;
     
