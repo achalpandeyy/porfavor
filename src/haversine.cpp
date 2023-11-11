@@ -1,12 +1,11 @@
 #include "haversine_common.h"
+#include "platform_metrics.h"
 
 // #define READ_SCOPE_TIMER ReadOSTimer
-// #define ENABLE_PROFILER 1
+#define ENABLE_PROFILER 1
 #include "haversine_profiler.h"
 
 #include <float.h>
-#include <sys/types.h>
-#include <sys/stat.h>
 
 static b32 StringsEqual(char *non_null_terminated, char *null_terminated, u32 len)
 {
@@ -40,8 +39,6 @@ static inline b32 IsPairComplete(ParsedJSONLine *line)
 
 static f64 ParseF64FromString(char *string, u32 *bytes_parsed)
 {
-    // PROFILE_FUNCTION;
-    
     f64 result = 0;
     char *ch = string;
     
@@ -240,11 +237,15 @@ static u64 ReadLine(char *line, u32 max_line_size, u8 *json_data)
 {
     u32 char_count = 0;
     u8 *src = json_data;
-    while (*src != '\n')
+    
+    while (*src != '\r')
     {
         *line++ = *src++;
         ++char_count;
     }
+    
+    src++; // eat up the '\r' character
+    ++char_count;
     
     // NOTE(achal): We still have to read the newline char at the end.
     *line++ = *src++;
@@ -303,11 +304,11 @@ int main(int argc, char **argv)
         fprintf(stdout, "answers_path: %s\n", answers_path);
     
     u8 *json_data = 0;
-    u64 json_char_count = 0;
+    u64 json_size = 0;
     {
-        // PROFILE_SCOPE("Read");
+        PROFILE_SCOPE("Read");
         
-        FILE *file = fopen(input_path, "r");
+        FILE *file = fopen(input_path, "rb");
         assert(file);
         
         struct __stat64 stat;
@@ -319,9 +320,13 @@ int main(int argc, char **argv)
         json_data = (u8 *)malloc(stat.st_size);
         assert(json_data);
         
-        json_char_count = fread(json_data, 1, stat.st_size, file);
+        {
+            PROFILE_SCOPE_BANDWIDTH("fread", stat.st_size);
+            json_size = fread(json_data, 1, stat.st_size, file);
+        }
+        
         fclose(file);
-        assert(json_char_count <= (size_t)stat.st_size);
+        assert(json_size <= (size_t)stat.st_size);
     }
     
     HaversinePair *haversine_pairs = (HaversinePair *)malloc(pair_count*sizeof(HaversinePair));
@@ -332,15 +337,14 @@ int main(int argc, char **argv)
     
     u64 parsed_pair_count = 0;
     {
-        // PROFILE_SCOPE("Parse");
+        PROFILE_SCOPE("Parse");
         
         memset(line, 0, sizeof(line));
-        u64 total_parsed_char_count = 0;
-        while (total_parsed_char_count < json_char_count)
+        u64 json_byte_offset = 0;
+        while (json_byte_offset < json_size)
         {
-            u64 parsed_char_count = ReadLine(line, sizeof(line), json_data+total_parsed_char_count);
+            u64 parsed_char_count = ReadLine(line, sizeof(line), json_data+json_byte_offset);
             b32 success = ParseJSONLine(line, &parsed_line);
-#if 1
             if (success)
             {
                 if (IsPairComplete(&parsed_line))
@@ -352,9 +356,8 @@ int main(int argc, char **argv)
             {
                 fprintf(stderr, "ERROR: Failed to parse line: %s\n", line);
             }
-#endif
             
-            total_parsed_char_count += parsed_char_count;
+            json_byte_offset += parsed_char_count;
             
             memset(line, 0, sizeof(line));
             
@@ -363,8 +366,9 @@ int main(int argc, char **argv)
             parsed_line.x1 = DBL_MAX;
             parsed_line.y1 = DBL_MAX;
         }
+        assert(json_byte_offset == json_size);
+        assert(parsed_pair_count == pair_count);
     }
-    assert(parsed_pair_count == pair_count);
     
     FILE *answers_file = 0;
     if (answers_path)
@@ -374,9 +378,8 @@ int main(int argc, char **argv)
     }
     
     f64 average = 0.0;
-#if 1
     {
-        // PROFILE_SCOPE("Sum Haversine Pairs");
+        PROFILE_SCOPE_BANDWIDTH("Sum Haversine Pairs", pair_count*sizeof(HaversinePair));
         
         for (u64 i = 0; i < pair_count; ++i)
         {
@@ -396,11 +399,10 @@ int main(int argc, char **argv)
             }
         }
     }
-#endif
     average /= pair_count;
     
     {
-        // PROFILE_SCOPE("Cleanup");
+        PROFILE_SCOPE("Cleanup");
         
         if (answers_file)
             fclose(answers_file);
@@ -410,7 +412,7 @@ int main(int argc, char **argv)
     }
     
     {
-        // PROFILE_SCOPE("Misc Output");
+        PROFILE_SCOPE("Misc Output");
         
         fprintf(stdout, "Haversine average: %.15f\n", average);
         
@@ -420,14 +422,6 @@ int main(int argc, char **argv)
     }
     
     EndProfiler();
-    
-    fprintf(stdout, "\nPerformance Profile:\n");
-    
-    u64 cpu_freq = EstimateScopeTimerFrequency(100);
-    u64 total_time = g_Profiler.elapsed;
-    f64 total_ms = ((f64)total_time/(f64)cpu_freq)*1000.0;
-    
-    fprintf(stdout, "Total time: %llu | %.4fms (CPU Frequency Estimate: %llu)\n", total_time, total_ms, cpu_freq);
     PrintPerformanceProfile();
     
     return 0;

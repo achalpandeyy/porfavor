@@ -3,8 +3,6 @@
 
 #include "porfavor_types.h"
 
-#define ArrayCount(arr) (sizeof(arr)/sizeof(arr[0]))
-
 #include <stdio.h>
 #include <assert.h>
 #include <math.h>

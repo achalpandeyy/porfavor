@@ -1,4 +1,5 @@
 build/
+build_*/
 .vs/
 .vscode/
 tests/
@@ -8,8 +9,9 @@ tests/
 *.txt
 *.json
 *.f64
+*.csv
 
-memory_dump.data
+memory_dump.bin
 
 listing_*
 out_listing_*

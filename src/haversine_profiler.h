@@ -1,37 +1,11 @@
 #ifndef HAVERSINE_PROFILER_H
 #define HAVERSINE_PROFILER_H
 
+#include "platform_metrics.h"
+
 #ifndef READ_SCOPE_TIMER
 #define READ_SCOPE_TIMER ReadCPUTimer
 #endif
-
-#ifdef _WIN32
-#include <intrin.h>
-#define WIN32_LEAN_AND_MEAN
-#include <windows.h>
-
-static inline u64 GetOSTimerFrequency()
-{
-    LARGE_INTEGER large_int;
-    BOOL retval = QueryPerformanceFrequency(&large_int);
-    assert(retval != 0);
-    u64 result = large_int.QuadPart;
-    return result;
-}
-
-static inline u64 ReadOSTimer()
-{
-    LARGE_INTEGER large_int;
-    BOOL retval = QueryPerformanceCounter(&large_int);
-    assert(retval != 0);
-    u64 result = large_int.QuadPart;
-    return result;
-}
-
-inline static u64 ReadCPUTimer()
-{
-    return __rdtsc();
-}
 
 static u64 EstimateScopeTimerFrequency(u64 ms_to_wait)
 {
@@ -54,15 +28,13 @@ static u64 EstimateScopeTimerFrequency(u64 ms_to_wait)
     
     return scope_timer_freq;
 }
-#else
-#error Only Windows is supported now!
-#endif
 
 struct ProfileAnchor
 {
     u64 elapsed_inclusive;
     u64 elapsed_exclusive;
     u64 hit_count;
+    u64 bytes_processed;
     char *label;
 };
 
@@ -89,7 +61,7 @@ struct ProfileScope
     char *label;
     u64 old_elapsed_inclusive;
     
-    ProfileScope(char *label_, u32 id)
+    ProfileScope(char *label_, u32 id, u64 bytes_processed)
     {
         assert((id != 0) && "0 is reserved for the invalid anchor");
         assert(id < ArrayCount(g_Profiler.anchors));
@@ -99,6 +71,7 @@ struct ProfileScope
         label = label_;
         
         ProfileAnchor *anchor = g_Profiler.anchors + anchor_id;
+        anchor->bytes_processed += bytes_processed;
         old_elapsed_inclusive = anchor->elapsed_inclusive;
         
         g_Profiler.active_anchor_id = id;
@@ -131,10 +104,35 @@ static inline f64 GetPercentage(u64 part, u64 whole)
     return result;
 }
 
+#define CONCAT_IMPL(a, b) a##b
+#define CONCAT(a, b) CONCAT_IMPL(a, b)
+#define PROFILE_SCOPE_BANDWIDTH(label, bytes) ProfileScope CONCAT(_prof_scope_, __LINE__)(label, __COUNTER__+1, bytes)
+#define PROFILE_FUNCTION_BANDWIDTH(bytes) PROFILE_SCOPE_BANDWIDTH(__func__, bytes)
+#define PROFILE_SCOPE(label) PROFILE_SCOPE_BANDWIDTH(label, 0)
+#define PROFILE_FUNCTION PROFILE_SCOPE(__func__)
+
+#define PROFILER_END_OF_COMPILATION_UNIT static_assert(ArrayCount(g_Profiler.anchors) >= __COUNTER__+1, "Ran out of `ProfileAnchor`s")
+#else
+
+#define PROFILE_SCOPE_BANDWIDTH(label, bytes)
+#define PROFILE_FUNCTION_BANDWIDTH(bytes)
+#define PROFILE_SCOPE
+#define PROFILE_FUNCTION
+
+#define PROFILER_END_OF_COMPILATION_UNIT
+#endif // ENABLE_PROFILER
+
 static void PrintPerformanceProfile()
 {
-    u64 total_time = g_Profiler.elapsed;
+    fprintf(stdout, "\nPerformance Profile:\n");
     
+    u64 cpu_freq = EstimateScopeTimerFrequency(100);
+    u64 total_time = g_Profiler.elapsed;
+    f64 total_ms = ((f64)total_time/(f64)cpu_freq)*1000.0;
+    
+    fprintf(stdout, "Total time: %llu | %.4fms (CPU Frequency Estimate: %llu)\n", total_time, total_ms, cpu_freq);
+    
+#if ENABLE_PROFILER
     for (u32 i = 0; i < ArrayCount(g_Profiler.anchors); ++i)
     {
         ProfileAnchor *anchor = g_Profiler.anchors + i;
@@ -142,26 +140,23 @@ static void PrintPerformanceProfile()
             continue;
         
         fprintf(stdout, "\t%s[%llu]: %llu (%.3f%%)", anchor->label, anchor->hit_count, anchor->elapsed_exclusive, GetPercentage(anchor->elapsed_exclusive, total_time));
+        
         if (anchor->elapsed_exclusive != anchor->elapsed_inclusive)
+        {
             fprintf(stdout, ", w/children: %llu (%.3f%%)", anchor->elapsed_inclusive, GetPercentage(anchor->elapsed_inclusive, total_time));
+        }
+        
+        if (anchor->bytes_processed)
+        {
+            f64 megabytes = anchor->bytes_processed/(1024.0*1024.0);
+            f64 gigabytes = megabytes/1024.0;
+            f64 gigabytes_per_second = cpu_freq*(gigabytes/anchor->elapsed_inclusive);
+            
+            fprintf(stdout, " %.3f MB at %.3f GB/s", megabytes, gigabytes_per_second);
+        }
         fprintf(stdout, "\n");
     }
+#endif
 }
-
-#define CONCAT_IMPL(a, b) a##b
-#define CONCAT(a, b) CONCAT_IMPL(a, b)
-#define PROFILE_SCOPE(label) ProfileScope CONCAT(_prof_scope_, __LINE__)(label, __COUNTER__+1)
-#define PROFILE_FUNCTION PROFILE_SCOPE(__func__)
-
-#define PROFILER_END_OF_COMPILATION_UNIT static_assert(ArrayCount(g_Profiler.anchors) >= __COUNTER__+1, "Ran out of `ProfileAnchor`s")
-#else
-
-#define PROFILE_SCOPE
-#define PROFILE_FUNCTION
-
-#define PrintPerformanceProfile(...)
-
-#define PROFILER_END_OF_COMPILATION_UNIT
-#endif // ENABLE_PROFILER
 
 #endif // HAVERSINE_PROFILER_H
